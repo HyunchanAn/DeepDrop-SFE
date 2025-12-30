@@ -1,0 +1,9 @@
+streamlit
+mobile-sam
+opencv-python
+scipy
+numpy
+matplotlib
+torch
+torchvision
+Pillow

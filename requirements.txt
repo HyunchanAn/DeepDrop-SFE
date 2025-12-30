@@ -1,5 +1,5 @@
 streamlit
-mobile-sam
+git+https://github.com/ChaoningZhang/MobileSAM.git
 opencv-python
 scipy
 numpy
@@ -7,3 +7,4 @@ matplotlib
 torch
 torchvision
 Pillow
+timm

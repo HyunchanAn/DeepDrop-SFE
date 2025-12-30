@@ -85,65 +85,87 @@ class DropletPhysics:
         
         return theta_deg
 
+    # Solvent Properties (at 20C)
+    LIQUID_DATA = {
+        "Water": {"g": 72.8, "d": 21.8, "p": 51.0},
+        "Diiodomethane": {"g": 50.8, "d": 50.8, "p": 0.0},
+        "Ethylene Glycol": {"g": 48.0, "d": 29.0, "p": 19.0},
+        "Glycerol": {"g": 64.0, "d": 34.0, "p": 30.0},
+        "Formamide": {"g": 58.0, "d": 39.0, "p": 19.0}
+    }
+
     @staticmethod
-    def calculate_owrk(angle_water, angle_diiodo):
+    def calculate_owrk(measurements):
         """
-        OWRK 방정식을 이용해 표면 에너지를 계산합니다.
+        OWRK 방정식을 이용해 표면 에너지를 계산합니다. (다중 액체 지원 - Linear Regression)
         
-        (1 + cosθ) * γ_L = 2 * (sqrt(γ_S^d * γ_L^d) + sqrt(γ_S^p * γ_L^p))
-        y = mx + c 형태로 변형하여 풉니다.
+        Linearized OWRK Equation:
+        Y = sqrt(gamma_s_p) * X + sqrt(gamma_s_d)
         
-        Data (Ström et al.):
-        Water:          gamma=72.8, d=21.8, p=51.0
-        Diiodomethane:  gamma=50.8, d=50.8, p=0.0
-        """
+        Where:
+        Y = (gamma_L * (1 + cos_theta)) / (2 * sqrt(gamma_L_d))
+        X = sqrt(gamma_L_p / gamma_L_d)
         
-        # Solvent Properties (at 20C)
-        liquids = {
-            "Water": {"g": 72.8, "d": 21.8, "p": 51.0},
-            "Diiodomethane": {"g": 50.8, "d": 50.8, "p": 0.0}
-        }
-        
-        # 계산 편의를 위한 단순화 로직 (실제 연립방정식 해)
-        # A * sqrt(gamma_s_d) + B * sqrt(gamma_s_p) = C 형태의 식 2개.
-        
-        # 방정식 1 (Water)
-        # 2*sqrt(21.8)*x + 2*sqrt(51.0)*y = (1 + cos(w)) * 72.8
-        
-        # 방정식 2 (Diiodomethane)
-        # 2*sqrt(50.8)*x + 2*sqrt(0.0)*y = (1 + cos(d)) * 50.8
-        # -> 2*sqrt(50.8)*x = (1 + cos(d)) * 50.8
-        # -> x (sqrt_gamma_s_d)를 바로 구할 수 있음.
-        
-        rad_w = np.radians(angle_water)
-        rad_d = np.radians(angle_diiodo)
-        
-        w_params = liquids["Water"]
-        d_params = liquids["Diiodomethane"]
-        
-        # 1. 분산 성분 (Dispersive) 계산 - Diiodomethane식 이용 (Polar component가 0이므로)
-        # 2 * sqrt(50.8 * S_d) = 50.8 * (1 + cos(theta_d))
-        # sqrt(S_d) = (50.8 * (1 + cos(theta_d))) / (2 * sqrt(50.8))
-        #           = sqrt(50.8) * (1 + cos(theta_d)) / 2
-        
-        sqrt_Sd = np.sqrt(d_params["d"]) * (1 + np.cos(rad_d)) / 2
-        Sd = sqrt_Sd ** 2
-        
-        # 2. 극성 성분 (Polar) 계산 - Water식 대입
-        # 72.8 * (1 + cos(theta_w)) = 2 * sqrt(21.8 * Sd) + 2 * sqrt(51.0 * Sp)
-        # sqrt(51.0 * Sp) = [ 72.8 * (1 + cos(theta_w)) - 2 * sqrt(21.8 * Sd) ] / 2
-        
-        lhs_water = w_params["g"] * (1 + np.cos(rad_w))
-        term_dispersive = 2 * np.sqrt(w_params["d"] * Sd)
-        
-        term_polar = lhs_water - term_dispersive
-        
-        # 음수 방지 (실험 오차로 인해 발생 가능)
-        if term_polar < 0:
-            term_polar = 0
+        Args:
+            measurements (list): List of dicts [{'liquid': 'Water', 'angle': 120}, ...]
             
-        sqrt_Sp = term_polar / (2 * np.sqrt(w_params["p"]))
-        Sp = sqrt_Sp ** 2
+        Returns:
+            total_sfe (float)
+            dispersive (float)
+            polar (float)
+        """
         
-        total_sfe = Sd + Sp
-        return total_sfe, Sd, Sp
+        X_points = []
+        Y_points = []
+        
+        for m in measurements:
+            name = m['liquid']
+            angle = m['angle']
+            
+            if name not in DropletPhysics.LIQUID_DATA:
+                continue
+                
+            props = DropletPhysics.LIQUID_DATA[name]
+            
+            # Skip if dispersive component is 0 to avoid division by zero (unlikely for probe liquids)
+            if props['d'] <= 0:
+                continue
+                
+            theta_rad = np.radians(angle)
+            
+            # Y term
+            # (gamma_L * (1 + cos_theta)) / (2 * sqrt(gamma_L_d))
+            y_val = (props['g'] * (1 + np.cos(theta_rad))) / (2 * np.sqrt(props['d']))
+            
+            # X term
+            # sqrt(gamma_L_p / gamma_L_d)
+            x_val = np.sqrt(props['p'] / props['d'])
+            
+            X_points.append(x_val)
+            Y_points.append(y_val)
+            
+        if len(X_points) < 2:
+            return None, 0.0, 0.0 # 최소 2개 이상의 액체 데이터 필요
+            
+        # Linear Regression (Least Squares)
+        A = np.vstack([X_points, np.ones(len(X_points))]).T
+        slope, intercept = np.linalg.lstsq(A, Y_points, rcond=None)[0]
+        
+        # Calculate SFE components
+        # Slope = sqrt(gamma_s_p) -> gamma_s_p = slope^2
+        # Intercept = sqrt(gamma_s_d) -> gamma_s_d = intercept^2
+        
+        # Physical constraints: SFE cannot be negative
+        # Linear fit might produce negative slope/intercept due to measurement errors.
+        # We take max(0, val) before squaring or after calculation? 
+        # Usually it's better to square the value but let's handle negative sqrt cases.
+        # If sqrt value is negative, it means the model fit is physically invalid for that component.
+        # But commonly we just square it. Let's be careful.
+        # If intercept is negative, it implies negative dispersive energy, which is impossible.
+        
+        gamma_s_p = slope**2
+        gamma_s_d = intercept**2
+
+        total_sfe = gamma_s_d + gamma_s_p
+        
+        return total_sfe, gamma_s_d, gamma_s_p

@@ -33,22 +33,23 @@ class PerspectiveCorrector:
         
         if not contours:
             print("PerspectiveCorrector: No contour found in reference mask.")
-            return None, None, None
+            return None, None, None, None
             
         largest_contour = max(contours, key=cv2.contourArea)
         
         # 2. Fit Ellipse
         if len(largest_contour) < 5:
             print("PerspectiveCorrector: Contour too small for ellipse fitting.")
-            return None, None, None
+            return None, None, None, None
             
         try:
             # (center(x, y), (MA, ma), angle)
             # axes lengths are the full lengths of the axes (diameter-like)
-            (cx, cy), (d1, d2), angle = cv2.fitEllipse(largest_contour)
+            fitted_ellipse = cv2.fitEllipse(largest_contour)
+            (cx, cy), (d1, d2), angle = fitted_ellipse
         except Exception as e:
             print(f"PerspectiveCorrector: Ellipse fitting failed - {e}")
-            return None, None, None
+            return None, None, None, None
             
         # Determine Major and Minor axes
         # We assume the larger one is the Major axis (diameter in 3D, approx)
@@ -92,10 +93,12 @@ class PerspectiveCorrector:
         ])
         
         # Local canonical points (center at 0,0)
-        p1_local = np.array([0, a])  # Top of unrotated (roughly)
-        p2_local = np.array([0, -a])
-        p3_local = np.array([b, 0])
-        p4_local = np.array([-b, 0])
+        # d1 is the length of the axis tilted by 'angle'. Let's call this local X.
+        p1_local = np.array([a, 0]) 
+        p2_local = np.array([-a, 0])
+        # d2 is the length of the perpendicular axis. Local Y.
+        p3_local = np.array([0, b])
+        p4_local = np.array([0, -b])
         
         # Rotated and translated to global
         p1 = np.dot(R, p1_local) + np.array([cx, cy])
@@ -106,39 +109,19 @@ class PerspectiveCorrector:
         src_pts = np.array([p1, p2, p3, p4], dtype=np.float32)
         
         # Target: A perfect circle with radius = Major Axis / 2
-        # We want to keep the center approximately where it is, or center it?
-        # Let's keep it at (cx, cy) to minimize drastic shifts, but align axes.
+        # Use the larger dimension to preserve resolution
         target_radius = max(a, b)
         
         # Target points (Canonical Circle)
-        # We map the Major Axis points to... vertical or horizontal?
-        # Let's map them to Vertical if they were vertical-ish, or just enforce a specific orientation.
-        # TO make "Top View", rotation doesn't matter much for a coin, but matters for the scene orientation.
-        # Let's map the Source Major Axis to the Target Y-axis (or X-axis).
-        # And Source Minor Axis to the other.
+        # We map p1, p2 (derived from d1) to the local X axis of the target circle
+        # We map p3, p4 (derived from d2) to the local Y axis of the target circle
         
-        # If we map d1 (associated with p1, p2) to radius, and d2 (p3, p4) to radius.
-        # Since d1 is length of axis along Y-local in my construction?
-        # Wait, if `cv2.fitEllipse` returns (w, h), w is x-axis length, h is y-axis length (before rotation).
-        # So p1_local (0, h/2) and p3_local (w/2, 0).
+        tp1_local = np.array([target_radius, 0])
+        tp2_local = np.array([-target_radius, 0])
+        tp3_local = np.array([0, target_radius])
+        tp4_local = np.array([0, -target_radius])
         
-        # Let's be explicit:
-        # Src P1, P2 correspond to the axis of length d2 (along local Y)
-        # Src P3, P4 correspond to the axis of length d1 (along local X)
-        
-        # Target:
-        # P1', P2' should be distance target_radius from center along local Y.
-        # P3', P4' should be distance target_radius from center along local X.
-        
-        tp1_local = np.array([0, target_radius])
-        tp2_local = np.array([0, -target_radius])
-        tp3_local = np.array([target_radius, 0])
-        tp4_local = np.array([-target_radius, 0])
-        
-        # Apply the SAME Rotation R to target points? 
-        # If we do that, we preserve the rotation of the coin in the image (it just becomes round).
-        # This is usually preferred so the image doesn't spin wildly.
-        
+        # Apply the SAME Rotation R to target points to keep orientation
         tp1 = np.dot(R, tp1_local) + np.array([cx, cy])
         tp2 = np.dot(R, tp2_local) + np.array([cx, cy])
         tp3 = np.dot(R, tp3_local) + np.array([cx, cy])
@@ -149,7 +132,7 @@ class PerspectiveCorrector:
         # Compute Homography
         H, _ = cv2.findHomography(src_pts, dst_pts)
         
-        return H, (image.shape[1], image.shape[0]), (cx, cy, target_radius)
+        return H, (image.shape[1], image.shape[0]), (cx, cy, target_radius), fitted_ellipse
 
     def warp_image(self, image, H, target_size):
         """

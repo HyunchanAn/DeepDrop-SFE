@@ -1,58 +1,73 @@
-# DeepDrop-Analyzer (v1.0)
-**AI 기반 정밀 표면 에너지 분석 솔루션 (AI-Based Surface Energy Analysis Solution)**
+# DeepDrop-AnyView (v2.0)
+**Arbitrary-Angle Surface Energy & Contact Angle Analysis System**
 
-![AI Demo Placeholder](https://via.placeholder.com/800x400?text=AI+Segmentation+Demo+GIF+Here)
-*(시연용: AI가 액적을 실시간으로 인식하고 분석하는 애니메이션이 이곳에 들어갑니다)*
+![DeepDrop AnyView](https://via.placeholder.com/800x400?text=DeepDrop+AnyView+Demo)
 
-## 1. 프로젝트 개요
-**DeepDrop-Analyzer**는 기존의 단순 OpenCV 알고리즘의 한계(빛 반사, 노이즈 취약성)를 극복하기 위해, **최신 AI Segmentation 기술(MobileSAM)**과 **정밀 물리 엔진(Classical Fitting)**을 결합한 하이브리드 솔루션입니다.
-학회 발표 및 대표이사 시연을 목적으로 엔터프라이즈급의 안정성과 시각적 탁월함을 제공합니다.
+**DeepDrop-AnyView**는 기존 측면(Side-view) 촬영 방식의 제약을 없앤 **임의 각도(Arbitrary-view) 접촉각 분석 시스템**입니다.
+10원 동전과 같은 **참조 물체(Reference Object)**를 이용하여 이미지를 **Top-view로 원근 보정(Homography)**하고, 물리적 부피(Volume) 기반으로 정확한 접촉각을 산출합니다.
 
-### 핵심 가치 (Key Value)
-- **Zero-shot Recognition**: 학습되지 않은 새로운 액체나 복잡한 배경에서도 AI가 즉각적으로 액적의 경계를 인식합니다.
-- **Robustness**: 딥러닝 마스킹을 통해 반사광(Reflection)이나 노이즈 문제를 완벽하게 필터링합니다.
-- **Automation**: 사람의 개입 없이 Baseline을 AI가 스스로 설정하여 측정 오차를 최소화합니다.
+## 주요 기능 (Key Features)
 
-## 2. 기술 스택 (Tech Stack)
-본 프로젝트는 **Python** 기반의 웹 애플리케이션으로 구성되어 있습니다.
+### 1. Arbitrary View Analysis (임의 각도 분석)
+- **Problem**: 기존 시스템은 정확한 90도 측면 촬영이 필수였습니다.
+- **Solution**: **Homography** 기술을 적용하여 어떤 각도에서 찍은 사진이든 평면(Top-down) 이미지로 변환하여 분석합니다.
 
-| 구분 | 기술 스택 | 비고 |
+### 2. Reference Object Calibration (참조 물체 기반 보정)
+- **Auto Scale**: 10원 동전(구형/신형)을 함께 촬영하면, AI가 이를 자동으로 감지하여 **Pixel-to-mm** 스케일을 계산합니다.
+- **Manual Fallback**: 조명이나 각도가 난해하여 AI가 동전을 찾지 못할 경우, **직접 그리기(Manual Selection)** 모드를 통해 분석을 계속할 수 있습니다.
+
+### 3. Volume-Based Calculation (부피 기반 연산)
+- **Physics Engine**: 단순한 타원 피팅이 아닌, 액적의 실제 **부피(Volume)**와 **접촉 반경(Contact Radius)**을 통해 물리적으로 타당한 접촉각을 역산(Numerical Solver)합니다.
+
+---
+
+## 기술 스택 (Tech Stack)
+
+| Component | Technology | Description |
 |---|---|---|
-| **Core AI** | **MobileSAM (Segment Anything Model)** | 경량화된 Zero-shot Segmentation 모델 |
-| **Physics** | **NumPy, SciPy, OpenCV** | 타원 피팅(Ellipse Fitting) 및 OWRK 수리 모델 연산 |
-| **Frontend** | **Streamlit** | 실시간 데이터 시각화 및 인터랙티브 대시보드 |
-| **Infra** | **Local (GPU/CPU)** | RTX 3060 이상 권장 (CPU 환경에서도 구동 가능) |
+| **AI Engine** | **MobileSAM** | Zero-shot Segmentation (학습 없는 즉각적 액적/동전 인식) |
+| **CV Engine** | **OpenCV Homography** | Perspective Correction (원근 보정 및 이미지 변환) |
+| **Physics** | **SciPy Optimization** | Volume & Diameter based Contact Angle Calculation |
+| **Frontend** | **Streamlit** | Interactive UI (Drag & Drop, Manual Drawing) |
 
-## 3. 설치 및 실행 방법
+---
 
-### 사전 요구 사항
-- Python 3.8 이상
-- (권장) CUDA 지원 GPU
+## 설치 및 실행 (Installation & Run)
 
-### 설치
+### 1. 환경 설정 (Prerequisites)
+- Python 3.9+
+- CUDA GPU 권장 (CPU 모드 지원)
+
+### 2. 설치 (Installation)
 ```bash
-# 1. 저장소 클론
+# Clone Repository
 git clone https://github.com/your-repo/DeepDrop-SFE.git
 cd DeepDrop-SFE
 
-# 2. 의존성 설치
+# Install Dependencies
 pip install -r requirements.txt
-
-# 3. MobileSAM 가중치 다운로드
-# 아래 링크에서 mobile_sam.pt를 다운로드 하여 models/ 폴더에 위치시켜야 합니다.
-# https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt
 ```
 
-### 실행
+### 3. 모델 다운로드 (Model Weights)
+`models/` 폴더에 MobileSAM 가중치 파일(`mobile_sam.pt`)이 있어야 합니다.
+- [MobileSAM Weights Download Link](https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt)
+
+### 4. 실행 (Run)
 ```bash
-streamlit run demo/app.py
+python -m streamlit run demo/app.py
 ```
 
-## 4. 데이터셋 및 분석 파이프라인
-1. **Image Input**: 실험 이미지 업로드 (JPG/PNG).
-2. **AI Segmentation**: MobileSAM이 액적 영역을 정밀 마스킹.
-3. **Mathematical Profiling**: 마스크 경계 추출 -> 타원 피팅 -> 접촉각(θ) 계산.
-4. **SFE Computation**: 2가지 용매(물, Diiodomethane 등)의 접촉각을 통해 표면 에너지 산출 (OWRK 모델).
+---
 
-## 5. 라이선스
-이 프로젝트는 **MIT License**를 따릅니다. MobileSAM 및 기타 오픈소스 라이브러리의 라이선스를 준수합니다.
+## 촬영 가이드 (Photography Guide)
+정확한 분석을 위해 다음 사항을 지켜주세요:
+
+1. **동전 배치**: 액적 옆에 **10원 동전**을 놓고 함께 촬영하세요. (동전이 너무 멀리 있으면 초점이 안 맞을 수 있습니다.)
+2. **배경**: 매끄러운 단색 배경이 가장 좋습니다. (반사가 심한 유리는 피하는 것이 좋습니다.)
+3. **각도**: 너무 극단적인 각도(거의 수평)보다는 **45도~80도** 정도의 사선 각도가 가장 분석하기 좋습니다.
+
+---
+
+## License
+This project is licensed under the **MIT License**.
+Based on [MobileSAM](https://github.com/ChaoningZhang/MobileSAM).

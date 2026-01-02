@@ -3,9 +3,14 @@ import cv2
 import numpy as np
 import sys
 import os
+from PIL import Image
+import pandas as pd
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+
+def import_image_pil(img_rgb):
+    return Image.fromarray(img_rgb)
 
 from ai_engine import AIContactAngleAnalyzer
 from physics_engine import DropletPhysics
@@ -120,6 +125,8 @@ ref_options = {
     R["opt_100_old"]: 24.0, # 100 KRW
     R["opt_100_new"]: 24.0,
     R["opt_500"]: 26.5,
+    "10원 동전 (Small)": 18.0,
+    "10원 동전 (Large)": 22.86,
     R["opt_custom"]: 0.0
 }
 ref_choice = st.sidebar.selectbox(R["lbl_ref_choice"], list(ref_options.keys()))
@@ -172,85 +179,157 @@ if uploaded_file:
     
     st.subheader(R["header_step1"])
     
-    # Auto-detect coin
+    # Selection Mode
+    mode = st.radio("찾는 방법 (Detection Mode)", ["자동 감지 (Auto)", "직접 그리기 (Manual Draw)"], horizontal=True)
+    
     col1, col2 = st.columns(2)
-    with col1:
-        st.image(image_rgb, caption=R["cap_original"], use_container_width=True)
+    coin_box = None
+    
+    if mode == "자동 감지 (Auto)":
+        with col1:
+            st.image(image_rgb, caption=R["cap_original"], use_column_width=True)
+            
+        with st.spinner(R["msg_detecting"]):
+            coin_box = analyzer.auto_detect_coin_candidate(image)
+            
+        if coin_box is not None:
+             # Draw box for visualization
+            preview_img = image_rgb.copy()
+            x1, y1, x2, y2 = coin_box
+            cv2.rectangle(preview_img, (x1, y1), (x2, y2), (0, 255, 0), 3)
+            
+            with col2:
+                st.image(preview_img, caption=R["cap_detected"], use_column_width=True)
+                
+            st.info(R["msg_confirm_box"])
+            if not st.checkbox(R["chk_confirm"], value=True):
+                coin_box = None # User rejected
+    
+    else: # Manual Mode
+        from streamlit_drawable_canvas import st_canvas
         
-    with st.spinner(R["msg_detecting"]):
-        coin_box = analyzer.auto_detect_coin_candidate(image)
+        st.info("마우스로 동전 주변에 박스를 그려주세요. (Draw a box around the coin)")
         
+        # Calculate canvas size to fit screen roughly
+        # Resize for display if too large? 
+        # Lets just use a fixed width or responsive.
+        # st_canvas usually works with fixed width/height.
+        
+        # Resize image for canvas if it's too big (e.g. > 800px width)
+        h, w, _ = image_rgb.shape
+        disp_width = 450 # Reduced to prevent column clipping
+        scale = disp_width / w
+        disp_height = int(h * scale)
+        
+        # Resize the actual image for display in canvas
+        # This ensures st_canvas shows the full image scaled down, not a crop.
+        resized_image = cv2.resize(image_rgb, (disp_width, disp_height)).astype(np.uint8)
+        
+        # We need to render the canvas
+        with col1:
+            canvas_result = st_canvas(
+                fill_color="rgba(255, 165, 0, 0.3)",  # Fixed fill color with some opacity
+                stroke_width=3,
+                stroke_color="#00FF00",
+                background_image=import_image_pil(resized_image), 
+                update_streamlit=True,
+                height=disp_height,
+                width=disp_width,
+                drawing_mode="rect",
+                key=f"canvas_{uploaded_file.name}",  # Dynamic key based on filename
+            )
+            
+        # Parse result
+        if canvas_result.json_data is not None:
+            objects = pd.json_normalize(canvas_result.json_data["objects"])
+            if not objects.empty:
+                # Get the last drawn box
+                obj = objects.iloc[-1]
+                left = int(obj["left"] / scale)
+                top = int(obj["top"] / scale)
+                width = int(obj["width"] / scale)
+                height = int(obj["height"] / scale)
+                
+                coin_box = np.array([left, top, left + width, top + height])
+                
+                with col2:
+                     # Show preview crop
+                     preview_img = image_rgb.copy()
+                     cv2.rectangle(preview_img, (left, top), (left+width, top+height), (0, 255, 0), 3)
+                     st.image(preview_img, caption="Manual Selection", use_column_width=True)
+
     if coin_box is not None:
-        # Draw box for visualization
-        preview_img = image_rgb.copy()
-        x1, y1, x2, y2 = coin_box
-        cv2.rectangle(preview_img, (x1, y1), (x2, y2), (0, 255, 0), 3)
+        # 2. Perspective Correction
+        st.subheader(R["header_step2"])
+            
+        # Generate detailed mask for homography
+        analyzer.set_image(image_rgb)
+        coin_mask, _ = analyzer.predict_mask(box=coin_box)
+        coin_mask_binary = analyzer.get_binary_mask(coin_mask)
         
+        # DEBUG: Visualize Coin Mask
         with col2:
-            st.image(preview_img, caption=R["cap_detected"], use_container_width=True)
+             st.image(coin_mask_binary * 255, caption="Debug: Coin Mask (Binary)", use_column_width=True)
+
+        # Calculate Homography
+        H, warped_size, coin_info, fitted_ellipse = corrector.find_homography(image_rgb, coin_mask_binary)
+        
+        if H is not None:
+            # DEBUG: Visualize Ellipse Fit on Original Image
+            debug_ellipse_img = image_rgb.copy()
+            (ecx, ecy), (eda, edb), eangle = fitted_ellipse
+            # Draw ellipse
+            cv2.ellipse(debug_ellipse_img, ((ecx, ecy), (eda, edb), eangle), (255, 0, 0), 2)
+            # Draw center
+            cv2.circle(debug_ellipse_img, (int(ecx), int(ecy)), 5, (0, 0, 255), -1)
             
-        st.info(R["msg_confirm_box"])
-        if st.checkbox(R["chk_confirm"], value=True):
+            with col1:
+                st.image(debug_ellipse_img, caption="Debug: Fitted Ellipse", use_column_width=True)
+
+            warped_img = corrector.warp_image(image_rgb, H, warped_size)
             
-            # 2. Perspective Correction
-            st.subheader(R["header_step2"])
+            # Visualize Warped Image
+            st.image(warped_img, caption=R["cap_warped"], use_column_width=True)
             
-            # Generate detailed mask for homography
-            analyzer.set_image(image_rgb)
-            coin_mask, _ = analyzer.predict_mask(box=coin_box)
-            coin_mask_binary = analyzer.get_binary_mask(coin_mask)
+            # 3. Droplet Analysis
+            st.write(R["msg_analyzing"])
             
-            # Calculate Homography
-            H, warped_size, coin_info = corrector.find_homography(image_rgb, coin_mask_binary)
+            # Analyze Droplet on Warped Image
+            analyzer.set_image(warped_img)
             
-            if H is not None:
-                warped_img = corrector.warp_image(image_rgb, H, warped_size)
-                
-                # Visualize Warped Image
-                col_w1, col_w2 = st.columns(2)
-                with col_w1:
-                    st.image(warped_img, caption=R["cap_warped"], use_container_width=True)
-                    
-                # 3. Droplet Analysis
-                with col_w2:
-                    st.write(R["msg_analyzing"])
-                    
-                    # Analyze Droplet on Warped Image
-                    analyzer.set_image(warped_img)
-                    
-                    # Assume droplet is near center or just use center point
-                    droplet_mask, drop_score = analyzer.predict_mask()
-                    
-                    # Visualization
-                    vis_mask = np.zeros_like(warped_img)
-                    vis_mask[droplet_mask] = [255, 0, 0] # Red mask
-                    overlay = cv2.addWeighted(warped_img, 0.7, vis_mask, 0.3, 0)
-                    st.image(overlay, caption=R["cap_segmentation"], use_container_width=True)
-                
-                # 4. Calculation
-                st.subheader(R["header_step3"])
-                
-                # Get scale
-                (cx, cy, radius_px) = coin_info
-                pixels_per_mm = DropletPhysics.calculate_pixels_per_mm(radius_px, real_diameter_mm)
-                
-                # Get Contact Diameter
-                contact_diameter_mm = DropletPhysics.calculate_contact_diameter(droplet_mask, pixels_per_mm)
-                
-                # Get Contact Angle
-                contact_angle = DropletPhysics.calculate_contact_angle(volume_ul, contact_diameter_mm)
-                
-                # Display Metrics
-                m1, m2, m3 = st.columns(3)
-                m1.metric(R["lbl_pixel_scale"], f"{pixels_per_mm:.1f} px/mm")
-                m2.metric(R["lbl_diameter"], f"{contact_diameter_mm:.2f} mm")
-                m3.metric(R["lbl_angle"], f"{contact_angle:.1f}°")
-                
-                st.success(R["msg_success"].format(contact_angle))
-                
-            else:
-                st.error(R["err_homography"])
+            # Assume droplet is near center or just use center point
+            droplet_mask, drop_score = analyzer.predict_mask()
+            
+            # Visualization
+            vis_mask = np.zeros_like(warped_img)
+            vis_mask[droplet_mask] = [255, 0, 0] # Red mask
+            overlay = cv2.addWeighted(warped_img, 0.7, vis_mask, 0.3, 0)
+            st.image(overlay, caption=R["cap_segmentation"], use_column_width=True)
+            
+            # 4. Calculation
+            st.subheader(R["header_step3"])
+            
+            # Get scale
+            (cx, cy, radius_px) = coin_info
+            pixels_per_mm = DropletPhysics.calculate_pixels_per_mm(radius_px, real_diameter_mm)
+            
+            # Get Contact Diameter
+            contact_diameter_mm = DropletPhysics.calculate_contact_diameter(droplet_mask, pixels_per_mm)
+            
+            # Get Contact Angle
+            contact_angle = DropletPhysics.calculate_contact_angle(volume_ul, contact_diameter_mm)
+            
+            # Display Metrics
+            m1, m2, m3 = st.columns(3)
+            m1.metric(R["lbl_pixel_scale"], f"{pixels_per_mm:.1f} px/mm")
+            m2.metric(R["lbl_diameter"], f"{contact_diameter_mm:.2f} mm")
+            m3.metric(R["lbl_angle"], f"{contact_angle:.1f}°")
+            
+            st.success(R["msg_success"].format(contact_angle))
+            
+        else:
+            st.error(R["err_homography"])
 
     else:
         st.error(R["err_no_coin"])
-        st.image(image_rgb, caption=R["cap_input"], use_container_width=True)
+        st.image(image_rgb, caption=R["cap_input"], use_column_width=True)

@@ -4,9 +4,9 @@ from mobile_sam import sam_model_registry, SamPredictor
 import cv2
 import os
 
-class AICntactAngleAnalyzer:
+class AIContactAngleAnalyzer:
     """
-    MobileSAM 기반 액적 세그멘테이션 분석기
+    MobileSAM based Droplet and Reference Object Analyzer.
     """
     def __init__(self, model_path, model_type="vit_t", device=None):
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
@@ -23,29 +23,25 @@ class AICntactAngleAnalyzer:
 
     def set_image(self, image_rgb):
         """
-        MobileSAM Predictor에 이미지를 설정합니다.
+        Sets the image for the MobileSAM predictor.
         image_rgb: numpy array (H, W, 3) format
         """
         self.predictor.set_image(image_rgb)
 
     def predict_mask(self, points=None, labels=None, box=None):
         """
-        프롬프트(점, 박스)를 기반으로 마스크를 생성합니다.
-        기본적으로 이미지 중앙을 클릭하는 것으로 가정하여 Zero-shot 추론을 시도할 수 있습니다.
+        Generates a mask based on prompts (points, box).
         """
         if points is None and box is None:
-            # 기본 전략: 이미지 중앙 하단을 액적의 위치로 가정
-            # (액적 접촉각 측정 이미지는 보통 중앙에 액적이 위치함)
-             # image embedding shape을 가져올 수 없으므로 원본 이미지 사이즈를 알아야 함.
-             # predictor.set_image를 호출했을 때의 shape을 사용.
+             # Default: Center point strategy
              h, w = self.predictor.original_size
              input_point = np.array([[w // 2, h // 2]])
-             input_label = np.array([1]) # 1: Foreground
+             input_label = np.array([1]) 
              
              masks, scores, logits = self.predictor.predict(
                 point_coords=input_point,
                 point_labels=input_label,
-                multimask_output=False, # 가장 신뢰도 높은 마스크 1개만
+                multimask_output=False,
             )
         else:
             masks, scores, logits = self.predictor.predict(
@@ -55,10 +51,68 @@ class AICntactAngleAnalyzer:
                 multimask_output=False,
             )
             
-        return masks[0], scores[0]
+        mask = masks[0]
+        score = scores[0]
+        return mask, score
+
+    def auto_detect_coin_candidate(self, image_cv2):
+        """
+        Uses OpenCV heuristics to find the most 'circular' object as a coin candidate.
+        Returns the bounding box [x_min, y_min, x_max, y_max] or None.
+        """
+        gray = cv2.cvtColor(image_cv2, cv2.COLOR_BGR2GRAY)
+        
+        # Preprocessing
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Adaptive Thresholding for better robustness against lighting
+        thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                     cv2.THRESH_BINARY_INV, 11, 2)
+        
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        best_cnt = None
+        best_score = -1
+        
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < 500: # Filter small noise
+                continue
+                
+            perimeter = cv2.arcLength(cnt, True)
+            if perimeter == 0:
+                continue
+                
+            # Circularity = 4 * pi * Area / (Perimeter^2)
+            # Perfect circle = 1.0
+            circularity = 4 * np.pi * area / (perimeter * perimeter)
+            
+            # Additional check: Convex Hull solidity
+            hull = cv2.convexHull(cnt)
+            hull_area = cv2.contourArea(hull)
+            if hull_area == 0: continue
+            solidity = float(area) / hull_area
+            
+            # Score: High circularity and high solidity
+            score = circularity * solidity
+            
+            if score > best_score:
+                best_score = score
+                best_cnt = cnt
+                
+        if best_cnt is not None and best_score > 0.6: # Threshold for "Circle-like"
+            x, y, w, h = cv2.boundingRect(best_cnt)
+            # Add padding
+            pad = 5
+            x_min = max(0, x - pad)
+            y_min = max(0, y - pad)
+            x_max = min(image_cv2.shape[1], x + w + pad)
+            y_max = min(image_cv2.shape[0], y + h + pad)
+            return np.array([x_min, y_min, x_max, y_max])
+            
+        return None
 
     def get_binary_mask(self, mask):
         """
-        Boolean 마스크를 0/255 uint8 이미지로 변환합니다.
+        Converts boolean mask to uint8 0/255.
         """
         return (mask * 255).astype(np.uint8)

@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv
+.env
+.vscode
+.idea
+
+# Dataset/Models (필요한 경우 제외, 여기서는 models/mobile_sam.pt가 필요하므로 제외하지 않음)
+# 만약 가중치 파일이 너무 크고 외부에서 마운트할 예정이라면 제외 가능
+# 현재는 포함하는 방향으로 설정
+
+# Project Specific
+.gemini
+test_image*.jpg
+README.md
+Dockerfile
+docker-compose.yml
+.dockerignore

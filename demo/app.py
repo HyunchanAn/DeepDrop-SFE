@@ -58,9 +58,23 @@ TRANS = {
         "lbl_diameter": "접촉 직경",
         "lbl_angle": "접촉각",
         "msg_success": "분석 완료: **{:.1f}°**",
+        "header_sfe_table": "데이터 관리 및 SFE (Data & SFE)",
+        "btn_add": "결과 추가 (Add to Table)",
+        "btn_clear": "초기화 (Clear)",
+        "lbl_total_sfe": "총 표면 에너지",
+        "lbl_disperse": "분산 성분",
+        "lbl_polar": "극성 성분",
+        "btn_export_csv": "CSV로 내보내기",
+        "btn_export_json": "JSON으로 내보내기",
         "err_homography": "원근 보정 실패. 동전이 찌그러져 있거나 윤곽선이 불분명합니다.",
         "err_no_coin": "동전을 찾을 수 없습니다. 조명이 밝고 동전이 선명한 사진을 사용해 주세요.",
-        "cap_input": "입력 이미지"
+        "cap_input": "입력 이미지",
+        "header_drop_detect": "액적 위치 지정 (Droplet Localization)",
+        "lbl_drop_mode": "액적 찾는 방법",
+        "opt_drop_auto": "자동 감지 (Advanced Auto)",
+        "opt_drop_manual": "수동 선택 (Box Draw)",
+        "msg_drop_confirm": "액적이 빨간색으로 잘 표시되었나요? 아니면 수동으로 선택해 주세요.",
+        "lbl_advanced_diag": "고급 진단 정보 (Advanced Diagnostics)"
     },
     "EN": {
         "title": "DeepDrop-AnyView: Arbitrary Angle SFE Analyzer",
@@ -99,9 +113,23 @@ TRANS = {
         "lbl_diameter": "Contact Diameter",
         "lbl_angle": "Contact Angle",
         "msg_success": "Analysis Complete: **{:.1f}°**",
+        "header_sfe_table": "Data Management & SFE",
+        "btn_add": "Add to Table",
+        "btn_clear": "Clear Table",
+        "lbl_total_sfe": "Total SFE",
+        "lbl_disperse": "Dispersive Component",
+        "lbl_polar": "Polar Component",
+        "btn_export_csv": "Export to CSV",
+        "btn_export_json": "Export to JSON",
         "err_homography": "Homography failed. The coin might be unclear or not circular.",
         "err_no_coin": "Could not auto-detect reference object. Ensure good lighting.",
-        "cap_input": "Input Image"
+        "cap_input": "Input Image",
+        "header_drop_detect": "Droplet Localization",
+        "lbl_drop_mode": "Droplet Detection Mode",
+        "opt_drop_auto": "Advanced Auto Detection",
+        "opt_drop_manual": "Manual Selection (Box Draw)",
+        "msg_drop_confirm": "Is the droplet correctly highlighted in red? If not, use manual mode.",
+        "lbl_advanced_diag": "Advanced Diagnostics"
     }
 }
 
@@ -143,6 +171,7 @@ liquid_type = st.sidebar.selectbox(R["lbl_liquid"], list(DropletPhysics.LIQUID_D
 # Model Loading
 @st.cache_resource
 def load_models():
+    # v2.1: Forced refresh to pick up new methods in ai_engine.py
     # Helper to download model if not exists
     model_path = os.path.join(os.path.dirname(__file__), "../models/mobile_sam.pt")
     if not os.path.exists(model_path):
@@ -195,7 +224,7 @@ if uploaded_file:
         if coin_box is not None:
              # Draw box for visualization
             preview_img = image_rgb.copy()
-            x1, y1, x2, y2 = coin_box
+            x1, y1, x2, y2 = map(int, coin_box)
             cv2.rectangle(preview_img, (x1, y1), (x2, y2), (0, 255, 0), 3)
             
             with col2:
@@ -292,19 +321,70 @@ if uploaded_file:
             st.image(warped_img, caption=R["cap_warped"], use_column_width=True)
             
             # 3. Droplet Analysis
-            st.write(R["msg_analyzing"])
+            st.divider()
+            st.subheader(R["header_drop_detect"])
+            
+            drop_mode = st.radio(R["lbl_drop_mode"], [R["opt_drop_auto"], R["opt_drop_manual"]], horizontal=True)
+            droplet_box = None
+            
+            if drop_mode == R["opt_drop_auto"]:
+                with st.spinner(R["msg_detecting"]):
+                    # Use new auto detection, excluding coin area
+                    # coin_box might be in original image coords. Warp it? 
+                    # Easier to just let auto_detect find objects in warped image.
+                    droplet_box = analyzer.auto_detect_droplet_candidate(warped_img)
+            
+            elif drop_mode == R["opt_drop_manual"]:
+                from streamlit_drawable_canvas import st_canvas
+                h_w, w_w, _ = warped_img.shape
+                d_w = 450
+                s_w = d_w / w_w
+                d_h = int(h_w * s_w)
+                
+                # Ensure res_w is explicitly uint8 for PIL and matches the format
+                res_w = cv2.resize(warped_img, (d_w, d_h)).astype(np.uint8)
+                
+                c_col1, c_col2 = st.columns(2)
+                with c_col1:
+                    canvas_drop = st_canvas(
+                        fill_color="rgba(255, 0, 0, 0.3)",
+                        stroke_width=2,
+                        stroke_color="#FF0000",
+                        background_image=import_image_pil(res_w),
+                        update_streamlit=True,
+                        height=d_h,
+                        width=d_w,
+                        drawing_mode="rect",
+                        key=f"canvas_drop_{uploaded_file.name}"
+                    )
+                
+                if canvas_drop.json_data is not None:
+                    objs = pd.json_normalize(canvas_drop.json_data["objects"])
+                    if not objs.empty:
+                        o = objs.iloc[-1]
+                        droplet_box = np.array([
+                            int(o["left"] / s_w),
+                            int(o["top"] / s_w),
+                            int((o["left"] + o["width"]) / s_w),
+                            int((o["top"] + o["height"]) / s_w)
+                        ])
             
             # Analyze Droplet on Warped Image
             analyzer.set_image(warped_img)
             
-            # Assume droplet is near center or just use center point
-            droplet_mask, drop_score = analyzer.predict_mask()
+            with st.spinner(R["msg_analyzing"]):
+                droplet_mask, drop_score = analyzer.predict_mask(box=droplet_box)
             
             # Visualization
             vis_mask = np.zeros_like(warped_img)
             vis_mask[droplet_mask] = [255, 0, 0] # Red mask
             overlay = cv2.addWeighted(warped_img, 0.7, vis_mask, 0.3, 0)
-            st.image(overlay, caption=R["cap_segmentation"], use_column_width=True)
+            
+            if drop_mode == "수동 (Box Draw)":
+                with c_col2:
+                    st.image(overlay, caption=R["cap_segmentation"], use_column_width=True)
+            else:
+                st.image(overlay, caption=R["cap_segmentation"], use_column_width=True)
             
             # 4. Calculation
             st.subheader(R["header_step3"])
@@ -316,8 +396,8 @@ if uploaded_file:
             # Get Contact Diameter
             contact_diameter_mm = DropletPhysics.calculate_contact_diameter(droplet_mask, pixels_per_mm)
             
-            # Get Contact Angle
-            contact_angle = DropletPhysics.calculate_contact_angle(volume_ul, contact_diameter_mm)
+            # Get Contact Angle with Info
+            contact_angle, diag = DropletPhysics.calculate_contact_angle(volume_ul, contact_diameter_mm, return_info=True)
             
             # Display Metrics
             m1, m2, m3 = st.columns(3)
@@ -326,6 +406,67 @@ if uploaded_file:
             m3.metric(R["lbl_angle"], f"{contact_angle:.1f}°")
             
             st.success(R["msg_success"].format(contact_angle))
+
+            # Advanced Diagnostics
+            with st.expander(R["lbl_advanced_diag"]):
+                st.write(f"**Solver Status**: {diag['status']}")
+                d_col1, d_col2 = st.columns(2)
+                with d_col1:
+                    st.write(f"- Droplet Radius (r): `{diag['r']:.4f}` mm")
+                    st.write(f"- Target Volume (V): `{diag['target_V']:.4f}` µL")
+                    st.write(f"- Full Sphere Vol: `{diag['v_full']:.4f}` µL")
+                with d_col2:
+                    st.write(f"- v_low (at 0°): `{diag['v_low']:.4f}`")
+                    st.write(f"- v_high (at 180°): `{diag['v_high']:.4e}`")
+                
+                if diag['status'] != "Success":
+                    st.warning("계산에 실패하거나 캡(Cap)이 씌워졌습니다. 위 값들을 개발자에게 전달해 주세요.")
+            
+            # 5. SFE Table Management
+            st.divider()
+            st.subheader(R["header_sfe_table"])
+            
+            if 'measurements' not in st.session_state:
+                st.session_state.measurements = []
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button(R["btn_add"]):
+                    st.session_state.measurements.append({
+                        "Liquid": liquid_type,
+                        "Angle": round(contact_angle, 2),
+                        "Volume": volume_ul,
+                        "Diameter": round(contact_diameter_mm, 2)
+                    })
+            with c2:
+                if st.button(R["btn_clear"]):
+                    st.session_state.measurements = []
+            
+            if st.session_state.measurements:
+                df = pd.DataFrame(st.session_state.measurements)
+                st.table(df)
+                
+                # Calculate SFE if at least 2 liquids
+                if len(df['Liquid'].unique()) >= 2:
+                    m_list = [{"liquid": row["Liquid"], "angle": row["Angle"]} for _, row in df.iterrows()]
+                    total_sfe, gamma_d, gamma_p = DropletPhysics.calculate_owrk(m_list)
+                    
+                    if total_sfe:
+                        st.info(f"### OWRK SFE Result")
+                        sf1, sf2, sf3 = st.columns(3)
+                        sf1.metric(R["lbl_total_sfe"], f"{total_sfe:.2f} mN/m")
+                        sf2.metric(R["lbl_disperse"], f"{gamma_d:.2f} mN/m")
+                        sf3.metric(R["lbl_polar"], f"{gamma_p:.2f} mN/m")
+                
+                # Export Buttons
+                st.write("---")
+                e1, e2 = st.columns(2)
+                with e1:
+                    csv = df.to_csv(index=False).encode('utf-8')
+                    st.download_button(R["btn_export_csv"], csv, "measurement_results.csv", "text/csv")
+                with e2:
+                    json_str = df.to_json(orient='records')
+                    st.download_button(R["btn_export_json"], json_str, "measurement_results.json", "application/json")
             
         else:
             st.error(R["err_homography"])

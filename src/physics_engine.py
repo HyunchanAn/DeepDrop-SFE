@@ -51,7 +51,7 @@ class DropletPhysics:
         return diameter_mm
 
     @staticmethod
-    def calculate_contact_angle(volume_ul, diameter_mm):
+    def calculate_contact_angle(volume_ul, diameter_mm, return_info=False):
         """
         Calculates Contact Angle (Theta) given Droplet Volume (uL) and Contact Diameter (mm).
         Uses numerical inversion of the Spherical Cap Volume formula.
@@ -60,44 +60,65 @@ class DropletPhysics:
         V = (pi * r^3 * (1 - cos(theta))^2 * (2 + cos(theta))) / (3 * sin(theta)^3)
         where r = diameter / 2
         """
+        diag = {
+            "v_low": 0.0, "v_high": 0.0, "target_V": volume_ul, 
+            "r": diameter_mm / 2.0 if diameter_mm else 0.0, 
+            "v_full": 0.0, "status": "Initializing"
+        }
+
+        if not np.isfinite(volume_ul) or not np.isfinite(diameter_mm):
+            diag["status"] = "Error: Non-finite inputs"
+            if return_info: return 0.0, diag
+            return 0.0
+
         if diameter_mm <= 0 or volume_ul <= 0:
+            diag["status"] = "Error: Zero or negative inputs"
+            if return_info: return 0.0, diag
             return 0.0
             
         r = diameter_mm / 2.0
         target_V = volume_ul # 1 uL = 1 mm^3
+        v_full = (4.0/3.0) * np.pi * (r**3)
+        diag["v_full"] = v_full
         
         # Function to find root for: f(theta) - target_V = 0
         def volume_eq(theta_deg):
-            if theta_deg <= 0.1 or theta_deg >= 179.9:
-                return -target_V # Avoid singularities, assume V=Large for theta=180
-                
-            theta_rad = np.radians(theta_deg)
+            theta_deg_clipped = np.clip(theta_deg, 1e-7, 179.99)
+            theta_rad = np.radians(theta_deg_clipped)
             sin_t = np.sin(theta_rad)
             cos_t = np.cos(theta_rad)
-            
-            # Spherical Cap Volume Factor
-            # term = (1-cos)(1-cos)(2+cos) / sin^3
             term = ((1 - cos_t)**2 * (2 + cos_t)) / (sin_t**3)
-            
             V_calc = (np.pi * r**3 / 3.0) * term
             return V_calc - target_V
             
-        # Numerical Solve
-        # Theta range: 0.1 to 179.9 degrees
         try:
-            # Check signs at endpoints to ensure root exists
-            v_low = volume_eq(0.1)   # Should be negative (calculated V near 0) - target_V
-            v_high = volume_eq(179.9) # Should be positive (calculated V near inf) - target_V
+            v_low = volume_eq(1e-7)
+            v_high = volume_eq(179.9)
+            diag["v_low"] = v_low
+            diag["v_high"] = v_high
             
             if v_low * v_high > 0:
-                # Should not happen for valid V, r
-                print(f"Physics Warning: Root finding failed. v_low={v_low}, v_high={v_high}")
+                if target_V >= v_full:
+                    diag["status"] = "Capped: Volume exceeds sphere"
+                    if return_info: return 180.0, diag
+                    return 180.0
+                
+                if target_V < 1e-5:
+                    diag["status"] = "Capped: Near-zero volume"
+                    if return_info: return 0.0, diag
+                    return 0.0
+
+                diag["status"] = "Warning: Sign mismatch"
+                if return_info: return 0.0, diag
                 return 0.0
                 
-            theta_sol = brentq(volume_eq, 0.1, 179.9)
+            theta_sol = brentq(volume_eq, 1e-7, 179.9)
+            diag["status"] = "Success"
+            if return_info: return theta_sol, diag
             return theta_sol
         except Exception as e:
-            print(f"Physics Error: {e}")
+            diag["status"] = f"Error: {e}"
+            if return_info: return 0.0, diag
             return 0.0
 
     @staticmethod

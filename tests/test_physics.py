@@ -3,10 +3,7 @@ import os
 import numpy as np
 import pytest
 
-# Add src to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
-
-from physics_engine import DropletPhysics
+from deepdrop_sfe import DropletPhysics
 
 def test_calculate_pixels_per_mm():
     # Coin radius 50px, real diameter 20mm -> 100px/20mm = 5px/mm

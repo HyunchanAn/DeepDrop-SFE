@@ -4,10 +4,7 @@ import numpy as np
 import pytest
 import cv2
 
-# Add src to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
-
-from perspective import PerspectiveCorrector
+from deepdrop_sfe import PerspectiveCorrector
 
 def test_find_homography_basic():
     corrector = PerspectiveCorrector()

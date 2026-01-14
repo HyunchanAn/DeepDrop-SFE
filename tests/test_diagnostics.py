@@ -3,10 +3,7 @@ import os
 import numpy as np
 import pytest
 
-# Add src to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
-
-from physics_engine import DropletPhysics
+from deepdrop_sfe import DropletPhysics
 
 def test_90_degree_diagnostics():
     # Case: V = 2/3 * pi * r^3

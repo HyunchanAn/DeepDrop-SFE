@@ -12,6 +12,16 @@ class AIContactAngleAnalyzer:
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Loading AI Model ({model_type}) on {self.device}...")
         
+        # Try to resolve model path if not absolute
+        if not os.path.exists(model_path):
+            # Fallback 1: Check if it's relative to the current working directory
+            if os.path.exists(os.path.join(os.getcwd(), model_path)):
+                model_path = os.path.join(os.getcwd(), model_path)
+            # Fallback 2: Check standard 'models' dir in project root 
+            # (assuming this file is in deepdrop_sfe/)
+            elif os.path.exists(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'mobile_sam.pt'))):
+                model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'mobile_sam.pt'))
+
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found at: {model_path}\nPlease download mobile_sam.pt and place it in the models directory.")
             

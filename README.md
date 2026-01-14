@@ -59,6 +59,38 @@ python -m streamlit run demo/app.py
 
 ---
 
+## 라이브러리 사용법 (Library Usage)
+
+본 프로젝트는 핵심 로직이 **`deepdrop_sfe`** 라는 독립된 Python 패키지로 분리되어 있어, 다른 AI/물리 시뮬레이션 프로젝트에서 쉽게 import 하여 사용할 수 있습니다.
+
+### 1. 라이브러리 설치
+```bash
+# 프로젝트 루트에서 editable 모드로 설치
+pip install -e .
+```
+
+### 2. Python 코드 예시
+```python
+from deepdrop_sfe import DropletPhysics
+
+# 1. 접촉각 계산 (Contact Angle Calculation)
+# 부피(Volume) = 3.0 µL, 접촉 직경(Diameter) = 9.13 mm
+angle, diag = DropletPhysics.calculate_contact_angle(3.0, 9.13, return_info=True)
+
+print(f"Calculated Angle: {angle:.2f}°")
+print(f"Diagnostics: {diag}")
+
+# 2. 표면 에너지 분석 (SFE Analysis - OWRK)
+data = [
+    {'liquid': 'Water', 'angle': 110.0},        
+    {'liquid': 'Diiodomethane', 'angle': 65.0}  
+]
+sfe, disperse, polar = DropletPhysics.calculate_owrk(data)
+print(f"Total SFE: {sfe:.2f} mN/m")
+```
+
+---
+
 ## 촬영 가이드 (Photography Guide)
 정확한 분석을 위해 다음 사항을 지켜주세요:
 

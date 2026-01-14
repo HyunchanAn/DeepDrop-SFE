@@ -6,18 +6,11 @@ import os
 from PIL import Image
 import pandas as pd
 
-# Add src to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+from deepdrop_sfe import AIContactAngleAnalyzer, DropletPhysics, PerspectiveCorrector
+
 
 def import_image_pil(img_rgb):
     return Image.fromarray(img_rgb)
-
-from ai_engine import AIContactAngleAnalyzer
-from physics_engine import DropletPhysics
-from perspective import PerspectiveCorrector
-
-# Page Config
-st.set_page_config(page_title="DeepDrop-AnyView", layout="wide")
 
 # --- Language Resource ---
 TRANS = {

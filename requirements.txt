@@ -1,6 +1,6 @@
 streamlit==1.39.0
 git+https://github.com/ChaoningZhang/MobileSAM.git
-opencv-python
+opencv-python-headless
 scipy
 numpy
 matplotlib
@@ -10,3 +10,4 @@ Pillow
 timm
 streamlit-drawable-canvas
 pandas
+-e .

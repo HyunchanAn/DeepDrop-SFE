@@ -10,7 +10,7 @@ requires-python = ">=3.8"
 dependencies = [
     "numpy",
     "scipy",
-    "opencv-python",
+    "opencv-python-headless",
     "torch",
     "mobile_sam @ git+https://github.com/ChaoningZhang/MobileSAM.git",
 ]

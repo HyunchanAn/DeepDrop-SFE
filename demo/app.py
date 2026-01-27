@@ -127,39 +127,85 @@ TRANS = {
 }
 
 # Language Selection
-lang_code = st.sidebar.radio("Language / 언어", ["KR", "EN"], horizontal=True)
+from streamlit_javascript import st_javascript
+
+# ... (Previous imports)
+
+# Language Selection
+# Move language selection to top level so it is always accessible or keep in sidebar/expander?
+# Let's keep it in the rendering function or separate.
+# Actually, Lang selection is global. Let's put it in the control function too or just keep it in sidebar for PC and main for Mobile.
+
+def render_controls(container, R):
+    container.header(R["header_config"])
+    
+    # Language (Optional: move here if we want it in the same block)
+    # lang_code = container.radio("Language / 언어", ["KR", "EN"], horizontal=True, key="lang_select")
+    # But R depends on lang_code, so lang_code must be decided BEFORE calling this or passed in?
+    # R is global currently. Let's just render the config interactions.
+
+    # Experiment Parameters
+    container.subheader(R["header_exp_params"])
+    volume_ul = container.number_input(R["lbl_volume"], min_value=0.1, value=3.0, step=0.1, key="ctrl_volume")
+    
+    # Reference Object
+    container.subheader(R["header_ref_obj"])
+    ref_options = {
+        R["opt_100_old"]: 24.0, # 100 KRW
+        R["opt_100_new"]: 24.0,
+        R["opt_500"]: 26.5,
+        "10원 동전 (Small)": 18.0,
+        "10원 동전 (Large)": 22.86,
+        R["opt_custom"]: 0.0
+    }
+    ref_choice = container.selectbox(R["lbl_ref_choice"], list(ref_options.keys()), key="ctrl_ref_choice")
+    
+    real_diameter_mm = 0.0
+    if ref_choice == R["opt_custom"]:
+        real_diameter_mm = container.number_input(R["lbl_ref_diam"], min_value=1.0, value=10.0, key="ctrl_custom_diam")
+    else:
+        real_diameter_mm = ref_options[ref_choice]
+        container.info(R["msg_diam"].format(real_diameter_mm))
+    
+    # Liquid Type
+    liquid_type = container.selectbox(R["lbl_liquid"], list(DropletPhysics.LIQUID_DATA.keys()), key="ctrl_liquid")
+    
+    return volume_ul, real_diameter_mm, liquid_type
+
+# Screen Width Detection
+# 0 means return value explicitly (optional default)
+ui_width = st_javascript("window.innerWidth")
+
+# Setup Language First (Global)
+# We can just put this in the sidebar always? Or if mobile, maybe top of page?
+# User wants "Left side functions to Main screen" on mobile.
+# Let's handle language selection before layout decision to get `R`.
+
+if ui_width is not None and ui_width < 800:
+    # Mobile Mode
+    is_mobile = True
+else:
+    # PC Mode (Default)
+    is_mobile = False
+
+# Render Language Toggle
+# For mobile, maybe small columns at top?
+if is_mobile:
+    lang_code = st.radio("Language / 언어", ["KR", "EN"], horizontal=True, key="lang_main")
+else:
+    lang_code = st.sidebar.radio("Language / 언어", ["KR", "EN"], horizontal=True, key="lang_side")
+    
 R = TRANS[lang_code]
 
 st.title(R["title"])
 st.markdown(R["notice"])
 
-# Sidebar
-st.sidebar.header(R["header_config"])
-
-# Experiment Parameters
-st.sidebar.subheader(R["header_exp_params"])
-volume_ul = st.sidebar.number_input(R["lbl_volume"], min_value=0.1, value=3.0, step=0.1)
-
-# Reference Object
-st.sidebar.subheader(R["header_ref_obj"])
-ref_options = {
-    R["opt_100_old"]: 24.0, # 100 KRW
-    R["opt_100_new"]: 24.0,
-    R["opt_500"]: 26.5,
-    "10원 동전 (Small)": 18.0,
-    "10원 동전 (Large)": 22.86,
-    R["opt_custom"]: 0.0
-}
-ref_choice = st.sidebar.selectbox(R["lbl_ref_choice"], list(ref_options.keys()))
-
-if ref_choice == R["opt_custom"]:
-    real_diameter_mm = st.sidebar.number_input(R["lbl_ref_diam"], min_value=1.0, value=10.0)
+# Render Controls
+if is_mobile:
+    with st.expander("⚙️ " + R["header_config"] + " (Settings)", expanded=False):
+        volume_ul, real_diameter_mm, liquid_type = render_controls(st, R)
 else:
-    real_diameter_mm = ref_options[ref_choice]
-    st.sidebar.info(R["msg_diam"].format(real_diameter_mm))
-
-# Liquid Type
-liquid_type = st.sidebar.selectbox(R["lbl_liquid"], list(DropletPhysics.LIQUID_DATA.keys()))
+    volume_ul, real_diameter_mm, liquid_type = render_controls(st.sidebar, R)
 
 # Model Loading
 @st.cache_resource

@@ -9,5 +9,6 @@ torchvision
 Pillow
 timm
 streamlit-drawable-canvas
+streamlit-javascript
 pandas
 -e .

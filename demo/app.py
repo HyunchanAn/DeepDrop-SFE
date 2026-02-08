@@ -32,9 +32,9 @@ TRANS = {
         "lbl_ref_diam": "물체 직경 (Diameter, mm)",
         "msg_diam": "직경: {} mm",
         "lbl_liquid": "액체 종류 (Liquid Type)",
-        "msg_downloading": "MobileSAM 모델 다운로드 중...",
-        "msg_download_done": "모델 다운로드 완료!",
-        "err_model_load": "모델 로드 실패: {}",
+        "msg_downloading": "SAM 2.1 모델 가중치 확인 및 다운로드 중...",
+        "msg_download_done": "모델 로드 완료!",
+        "err_model_load": "SAM 2.1 모델 로드 실패: {}",
         "lbl_upload": "이미지 업로드 (동전 & 액적 포함)",
         "header_step1": "1. 기준 물체 감지 (Reference Detection)",
         "cap_original": "원본 이미지",
@@ -87,9 +87,9 @@ TRANS = {
         "lbl_ref_diam": "Diameter (mm)",
         "msg_diam": "Diameter: {} mm",
         "lbl_liquid": "Liquid Type",
-        "msg_downloading": "Downloading MobileSAM model...",
-        "msg_download_done": "Model downloaded!",
-        "err_model_load": "Failed to load models: {}",
+        "msg_downloading": "Checking/Downloading SAM 2.1 weights...",
+        "msg_download_done": "Model loaded!",
+        "err_model_load": "Failed to load SAM 2.1: {}",
         "lbl_upload": "Upload Image (with Coin & Droplet)",
         "header_step1": "1. Reference Object Detection",
         "cap_original": "Original Image",
@@ -210,22 +210,15 @@ else:
 # Model Loading
 @st.cache_resource
 def load_models():
-    # v2.1: Forced refresh to pick up new methods in ai_engine.py
-    # Helper to download model if not exists
-    model_path = os.path.join(os.path.dirname(__file__), "../models/mobile_sam.pt")
-    if not os.path.exists(model_path):
-        import requests
-        st.info(R["msg_downloading"])
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        url = "https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt"
-        r = requests.get(url)
-        with open(model_path, 'wb') as f:
-            f.write(r.content)
-        st.success(R["msg_download_done"])
-        
+    """
+    SAM 2.1 모델 로드 (ai_engine.py의 최신 사양 준수)
+    """
     try:
-        analyzer = AIContactAngleAnalyzer(model_path)
-        corrector = PerspectiveCorrector()
+        # 하이엔드 하드웨어(RTX 5080)를 위해 large 모델 사용
+        # 초기 실행 시 HF에서 자동으로 다운로드함
+        with st.spinner(R["msg_downloading"]):
+            analyzer = AIContactAngleAnalyzer(model_id="facebook/sam2.1-hiera-large")
+            corrector = PerspectiveCorrector()
         return analyzer, corrector
     except Exception as e:
         st.error(R["err_model_load"].format(e))
@@ -274,57 +267,36 @@ if uploaded_file:
                 coin_box = None # User rejected
     
     else: # Manual Mode
-        from streamlit_drawable_canvas import st_canvas
+        st.info("슬라이더를 사용하여 동전 영역을 지정해주세요. (Use sliders to specify coin region)")
         
-        st.info("마우스로 동전 주변에 박스를 그려주세요. (Draw a box around the coin)")
-        
-        # Calculate canvas size to fit screen roughly
-        # Resize for display if too large? 
-        # Lets just use a fixed width or responsive.
-        # st_canvas usually works with fixed width/height.
-        
-        # Resize image for canvas if it's too big (e.g. > 800px width)
         h, w, _ = image_rgb.shape
-        disp_width = 450 # Reduced to prevent column clipping
-        scale = disp_width / w
-        disp_height = int(h * scale)
         
-        # Resize the actual image for display in canvas
-        # This ensures st_canvas shows the full image scaled down, not a crop.
-        resized_image = cv2.resize(image_rgb, (disp_width, disp_height)).astype(np.uint8)
+        col_input1, col_input2 = st.columns(2)
         
-        # We need to render the canvas
-        with col1:
-            canvas_result = st_canvas(
-                fill_color="rgba(255, 165, 0, 0.3)",  # Fixed fill color with some opacity
-                stroke_width=3,
-                stroke_color="#00FF00",
-                background_image=import_image_pil(resized_image), 
-                update_streamlit=True,
-                height=disp_height,
-                width=disp_width,
-                drawing_mode="rect",
-                key=f"canvas_{uploaded_file.name}",  # Dynamic key based on filename
-            )
+        with col_input1:
+            st.write("**좌상단 좌표 (Top-Left)**")
+            x1 = st.slider("X1", 0, w, int(w*0.3), key="x1")
+            y1 = st.slider("Y1", 0, h, int(h*0.3), key="y1")
+        
+        with col_input2:
+            st.write("**우하단 좌표 (Bottom-Right)**")
+            x2 = st.slider("X2", 0, w, int(w*0.7), key="x2")
+            y2 = st.slider("Y2", 0, h, int(h*0.7), key="y2")
+        
+        # Validate box
+        if x2 > x1 and y2 > y1:
+            coin_box = np.array([x1, y1, x2, y2])
             
-        # Parse result
-        if canvas_result.json_data is not None:
-            objects = pd.json_normalize(canvas_result.json_data["objects"])
-            if not objects.empty:
-                # Get the last drawn box
-                obj = objects.iloc[-1]
-                left = int(obj["left"] / scale)
-                top = int(obj["top"] / scale)
-                width = int(obj["width"] / scale)
-                height = int(obj["height"] / scale)
-                
-                coin_box = np.array([left, top, left + width, top + height])
-                
-                with col2:
-                     # Show preview crop
-                     preview_img = image_rgb.copy()
-                     cv2.rectangle(preview_img, (left, top), (left+width, top+height), (0, 255, 0), 3)
-                     st.image(preview_img, caption="Manual Selection", use_column_width=True)
+            # Show preview
+            preview_img = image_rgb.copy()
+            cv2.rectangle(preview_img, (x1, y1), (x2, y2), (0, 255, 0), 3)
+            
+            with col1:
+                st.image(preview_img, caption="Manual Selection Preview", use_column_width=True)
+        else:
+            st.warning("좌표가 올바르지 않습니다. X2 > X1, Y2 > Y1이어야 합니다.")
+            coin_box = None
+
 
     if coin_box is not None:
         # 2. Perspective Correction
@@ -416,7 +388,8 @@ if uploaded_file:
             
             # Visualization
             vis_mask = np.zeros_like(warped_img)
-            vis_mask[droplet_mask] = [255, 0, 0] # Red mask
+            droplet_mask_bool = droplet_mask.astype(bool)  # Convert to boolean for indexing
+            vis_mask[droplet_mask_bool] = [255, 0, 0] # Red mask
             overlay = cv2.addWeighted(warped_img, 0.7, vis_mask, 0.3, 0)
             
             if drop_mode == "수동 (Box Draw)":

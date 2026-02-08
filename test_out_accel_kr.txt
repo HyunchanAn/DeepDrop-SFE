@@ -1,0 +1,23 @@
+==================================================
+DeepDrop-SFE 하드웨어 가속 검증
+==================================================
+[OS] Windows 11
+[CPU] AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD
+[GPU] CUDA 사용 가능: True
+  - 장치 0: NVIDIA GeForce RTX 5080
+    VRAM: 15.9 GB
+    연산 능력(Compute Capability): 12.0
+
+[AI] 검증을 위해 SAM 2.1 (facebook/sam2.1-hiera-tiny) 초기화 중...
+SAM 2.1 모델 (facebook/sam2.1-hiera-tiny)을 GPU에서 로드 중: NVIDIA GeForce RTX 5080 (15.9GB VRAM)...
+SAM 2.1 (facebook/sam2.1-hiera-tiny) 로드 완료.
+  - 모델 로드 시간: 0.98초
+  - 추론 실행 중 (1024x1024 이미지)...
+  - predict_mask 결과 타입: <class 'tuple'>
+  - 결과 길이: 2
+  - set_image 시간: 1603.9ms
+  - predict_mask 시간: 113.0ms
+  - 예측 점수(Prediction Score): 0.2727
+  - 최대 GPU 메모리 점유: 6681.4 MB
+
+[상태] SAM2.1 하드웨어 가속: 성공 ✅

@@ -9,7 +9,7 @@
 ## 주요 기능 (Key Features)
 
 ### 1. Arbitrary View Analysis (임의 각도 분석)
-- **Problem**: 기존 시스템은 정확한 90도 측면 촬영이 필수였습니다.
+- **Problem**: 기존 시스템은 정확한 90도 측면 촬영이 필수적이었습니다.
 - **Solution**: **Homography** 기술을 적용하여 어떤 각도에서 찍은 사진이든 평면(Top-down) 이미지로 변환하여 분석합니다.
 
 ### 2. Reference Object Calibration (참조 물체 기반 보정)
@@ -19,13 +19,16 @@
 ### 3. Volume-Based Calculation (부피 기반 연산)
 - **Physics Engine**: 단순한 타원 피팅이 아닌, 액적의 실제 **부피(Volume)**와 **접촉 반경(Contact Radius)**을 통해 물리적으로 타당한 접촉각을 역산(Numerical Solver)합니다.
 
+### 4. High-End Hardware Optimization (하드웨어 최적화)
+- **RTX 5080 지원**: 최신 Blackwell 아키텍처 및 CUDA 12.8 환경에서 **SAM 2.1** 모델을 통해 초고속(약 30ms) 이미지 분석을 제공합니다.
+
 ---
 
 ## 기술 스택 (Tech Stack)
 
 | Component | Technology | Description |
 |---|---|---|
-| **AI Engine** | **MobileSAM** | Zero-shot Segmentation (학습 없는 즉각적 액적/동전 인식) |
+| **AI Engine** | **SAM 2.1** | State-of-the-Art Segmentation (RTX 5080 최적화) |
 | **CV Engine** | **OpenCV Homography** | Perspective Correction (원근 보정 및 이미지 변환) |
 | **Physics** | **SciPy Optimization** | Volume & Diameter based Contact Angle Calculation |
 | **Frontend** | **Streamlit** | Interactive UI (Drag & Drop, Manual Drawing) |
@@ -35,8 +38,9 @@
 ## 설치 및 실행 (Installation & Run)
 
 ### 1. 환경 설정 (Prerequisites)
-- Python 3.9+
-- CUDA GPU 권장 (CPU 모드 지원)
+- **Python 3.12~3.14**
+- **GPU**: NVIDIA RTX 40/50 시리즈 권장 (CUDA 12.x 필수)
+- **하드웨어 가속**: RTX 5080 사용자라면 CUDA 12.8 기반 PyTorch 나이틀리 빌드 권장.
 
 ### 2. 설치 (Installation)
 ```bash
@@ -48,9 +52,8 @@ cd DeepDrop-SFE
 pip install -r requirements.txt
 ```
 
-### 3. 모델 다운로드 (Model Weights)
-`models/` 폴더에 MobileSAM 가중치 파일(`mobile_sam.pt`)이 있어야 합니다.
-- [MobileSAM Weights Download Link](https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt)
+### 3. 모델 가중치 (Model Weights)
+SAM 2.1 모델은 초기 실행 시 Hugging Face를 통해 자동으로 다운로드됩니다. (`facebook/sam2.1-hiera-large` 기본값)
 
 ### 4. 실행 (Run)
 ```bash

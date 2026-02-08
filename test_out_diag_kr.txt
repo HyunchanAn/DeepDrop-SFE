@@ -1,0 +1,65 @@
+Sun Feb  8 21:16:55 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 591.74                 Driver Version: 591.74         CUDA Version: 13.1     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                  Driver-Model | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GeForce RTX 5080      WDDM  |   00000000:01:00.0  On |                  N/A |
+|  0%   50C    P3             43W /  360W |    1853MiB /  16303MiB |     12%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|    0   N/A  N/A            4452    C+G   ...t\Edge\Application\msedge.exe      N/A      |
+|    0   N/A  N/A           12568    C+G   C:\Windows\explorer.exe               N/A      |
+|    0   N/A  N/A           14064    C+G   ..._cw5n1h2txyewy\SearchHost.exe      N/A      |
+|    0   N/A  N/A           14072    C+G   ...y\StartMenuExperienceHost.exe      N/A      |
+|    0   N/A  N/A           14224    C+G   ...cw5n1h2txyewy\WidgetBoard.exe      N/A      |
+|    0   N/A  N/A           18592    C+G   ...0.3719.104\msedgewebview2.exe      N/A      |
+|    0   N/A  N/A           19252    C+G   ...Chrome\Application\chrome.exe      N/A      |
+|    0   N/A  N/A           21164    C+G   ...5n1h2txyewy\TextInputHost.exe      N/A      |
+|    0   N/A  N/A           24128    C+G   ...__kzh8wxbdkxb8p\DCv2\DCv2.exe      N/A      |
+|    0   N/A  N/A           25704    C+G   ...em32\ApplicationFrameHost.exe      N/A      |
+|    0   N/A  N/A           30424    C+G   ...xyewy\ShellExperienceHost.exe      N/A      |
+|    0   N/A  N/A           41280    C+G   ...s\Antigravity\Antigravity.exe      N/A      |
+|    0   N/A  N/A           43204    C+G   ...0.3719.104\msedgewebview2.exe      N/A      |
+|    0   N/A  N/A           51188    C+G   ...App_cw5n1h2txyewy\LockApp.exe      N/A      |
+|    0   N/A  N/A           52012    C+G   ...crosoft OneDrive\OneDrive.exe      N/A      |
+|    0   N/A  N/A           52820    C+G   ...me SxS\Application\chrome.exe      N/A      |
+|    0   N/A  N/A           54604    C+G   ...p\app-3.5.4\GitHubDesktop.exe      N/A      |
+|    0   N/A  N/A           57032    C+G   ...s\Antigravity\Antigravity.exe      N/A      |
+|    0   N/A  N/A           57200    C+G   ...0.3719.104\msedgewebview2.exe      N/A      |
++-----------------------------------------------------------------------------------------+
+==================================================
+시스템 및 하드웨어 가속 진단 보고서
+==================================================
+OS: Windows 11 (10.0.26200)
+Python: 3.14.2 (tags/v3.14.2:df79316, Dec  5 2025, 17:18:21) [MSC v.1944 64 bit (AMD64)]
+CPU 정보: {
+
+    "Name":  "AMD Ryzen 9 9900X 12-Core Processor            ",
+
+    "NumberOfCores":  12,
+
+    "NumberOfLogicalProcessors":  24
+
+}
+
+
+--------------------------------------------------
+PyTorch 및 GPU 가속 확인:
+  - torch_version: 2.11.0.dev20260208+cu128
+  - cuda_available: True
+  - device_count: 1
+  - current_device: NVIDIA GeForce RTX 5080
+  - cuda_version: 12.8
+  - cudnn_version: 91002
+--------------------------------------------------
+NVIDIA-SMI 상태:
+==================================================

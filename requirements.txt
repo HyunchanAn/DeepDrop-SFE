@@ -1,14 +1,17 @@
-streamlit==1.39.0
-git+https://github.com/ChaoningZhang/MobileSAM.git
+streamlit>=1.39.0
+git+https://github.com/facebookresearch/segment-anything-2.git
 opencv-python-headless
 scipy
-numpy
+numpy>=1.26.0
 matplotlib
 torch
 torchvision
-Pillow
+Pillow>=11.0.0
 timm
 streamlit-drawable-canvas
 streamlit-javascript
 pandas
 -e .
+# RTX 5080 (Blackwell) 사용자의 경우, CUDA 12.8 지원을 위해
+# 다음 명령으로 PyTorch 나이틀리 빌드 설치를 권장합니다:
+# pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128

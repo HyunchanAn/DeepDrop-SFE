@@ -3,8 +3,8 @@
 
 ![DeepDrop AnyView](https://via.placeholder.com/800x400?text=DeepDrop+AnyView+Demo)
 
-**DeepDrop-AnyView**는 기존 측면(Side-view) 촬영 방식의 제약을 없앤 **임의 각도(Arbitrary-view) 접촉각 분석 시스템**입니다.
-10원 동전과 같은 **참조 물체(Reference Object)**를 이용하여 이미지를 **Top-view로 원근 보정(Homography)**하고, 물리적 부피(Volume) 기반으로 정확한 접촉각을 산출합니다.
+DeepDrop-AnyView는 기존 측면(Side-view) 촬영 방식의 제약을 없앤 임의 각도(Arbitrary-view) 접촉각 분석 시스템입니다.
+100원 동전과 같은 참조 물체(Reference Object)를 이용하여 이미지를 Top-view로 원근 보정(Homography)하고, 물리적 부피(Volume) 기반으로 정확한 접촉각을 산출합니다.
 
 ## 주요 기능 (Key Features)
 

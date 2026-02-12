@@ -31,21 +31,37 @@ class DropletPhysics:
         return coin_diameter_pixel / real_coin_diameter_mm
 
     @staticmethod
-    def calculate_contact_diameter(droplet_mask, pixels_per_mm):
+    def calculate_contact_diameter(droplet_mask, pixels_per_mm, method="fitting"):
         """
         Calculates the real contact diameter of the droplet from its mask.
-        Assumes the mask represents the circular base (top-view).
+        
+        Methods:
+        - 'area': Equivalent diameter based on total pixel area.
+        - 'fitting': Geometric diameter using minimum enclosing circle (robust to noise).
         """
-        # Calculate Area in pixels
-        area_pixels = np.sum(droplet_mask > 0)
-        
-        if area_pixels == 0:
+        if pixels_per_mm <= 0:
             return 0.0
-            
-        # Equivalent Diameter in pixels (assuming circle)
-        # Area = pi * (d/2)^2 => d = 2 * sqrt(Area / pi)
-        diameter_pixels = 2 * np.sqrt(area_pixels / np.pi)
+
+        # Find contours
+        contours, _ = cv2.findContours(droplet_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return 0.0
         
+        # Select the largest contour
+        cnt = max(contours, key=cv2.contourArea)
+        area_pixels = cv2.contourArea(cnt)
+        
+        if area_pixels < 10:
+            return 0.0
+
+        if method == "area":
+            # Area = pi * (d/2)^2 => d = 2 * sqrt(Area / pi)
+            diameter_pixels = 2 * np.sqrt(area_pixels / np.pi)
+        else:
+            # Geometric fitting: Minimum Enclosing Circle
+            (x, y), radius = cv2.minEnclosingCircle(cnt)
+            diameter_pixels = 2 * radius
+            
         # Convert to mm
         diameter_mm = diameter_pixels / pixels_per_mm
         return diameter_mm
@@ -114,6 +130,27 @@ class DropletPhysics:
                 
             theta_sol = brentq(volume_eq, 1e-7, 179.9)
             diag["status"] = "Success"
+            
+            # --- Reliability Metrics ---
+            # 1. Sensitivity Analysis (Numerical Gradient)
+            eps_v = target_V * 0.01
+            eps_d = diameter_mm * 0.01
+            
+            def get_angle(v, d):
+                r_local = d / 2.0
+                def eq(t):
+                    tr = np.radians(np.clip(t, 1e-7, 179.99))
+                    val = (np.pi * r_local**3 / 3.0) * ((1 - np.cos(tr))**2 * (2 + np.cos(tr))) / (np.sin(tr)**3)
+                    return val - v
+                try: return brentq(eq, 1e-7, 179.9)
+                except: return theta_sol
+
+            angle_v_plus = get_angle(target_V + eps_v, diameter_mm)
+            diag["sensitivity_v"] = (angle_v_plus - theta_sol) / 1.0 # % change in V -> change in Angle
+            
+            angle_d_plus = get_angle(target_V, diameter_mm + eps_d)
+            diag["sensitivity_d"] = (angle_d_plus - theta_sol) / 1.0 # % change in D -> change in Angle
+
             if return_info: return theta_sol, diag
             return theta_sol
         except Exception as e:

@@ -106,7 +106,25 @@ class AIContactAngleAnalyzer:
             return masks[idx], scores[idx]
             
         best = max(valid_masks, key=lambda x: x['final_score'])
-        return best['mask'], best['sam_score']
+        
+        # --- Post-processing: Clean Mask ---
+        final_mask = self.clean_mask(best['mask'])
+        
+        return final_mask, best['sam_score']
+
+    def clean_mask(self, mask):
+        """
+        Applies morphological operations to remove small noise and smooth edges.
+        """
+        mask_uint8 = (mask * 255).astype(np.uint8)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        
+        # Remove small noise dots (Opening)
+        mask_clean = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel)
+        # Fill small holes inside (Closing)
+        mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_CLOSE, kernel)
+        
+        return mask_clean > 127
 
     def auto_detect_coin_candidate(self, image_cv2):
         """

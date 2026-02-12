@@ -41,7 +41,7 @@ class AIContactAngleAnalyzer:
         self.image_size = image_rgb.shape[:2]  # (H, W) 크기 저장
         self.predictor.set_image(image_rgb)
 
-    def predict_mask(self, points=None, labels=None, box=None):
+    def predict_mask(self, point_coords=None, point_labels=None, box=None, prefer_largest=False, prefer_circular=False):
         """
         프롬프트(점, 박스)를 기반으로 마스크를 생성함.
         SAM2의 멀티 마스크 출력 및 필터링 로직을 사용함.
@@ -51,63 +51,75 @@ class AIContactAngleAnalyzer:
 
         h, w = self.image_size
 
-        if points is None and box is None:
-             # Default: Center point strategy
-             input_point = np.array([[w // 2, h // 2]])
-             input_label = np.array([1]) 
-             
-             masks, scores, logits = self.predictor.predict(
-                point_coords=input_point,
-                point_labels=input_label,
-                multimask_output=True,
-            )
-        else:
-            masks, scores, logits = self.predictor.predict(
-                point_coords=points,
-                point_labels=labels,
-                box=box,
-                multimask_output=True,
-            )
+        masks, scores, logits = self.predictor.predict(
+            point_coords=point_coords,
+            point_labels=point_labels,
+            box=box,
+            multimask_output=True,
+        )
             
-        # 가장 적합한 마스크를 선택함.
         valid_masks = []
         img_area = h * w
         
         for i in range(len(masks)):
             mask = masks[i]
             mask_area = np.sum(mask)
-            if mask_area < 10 or mask_area > 0.8 * img_area:
+            # 면적 범위: 전체의 1% ~ 50%
+            if mask_area < img_area * 0.01 or mask_area > 0.5 * img_area:
                 continue
             
-            # 경계 영역 체크
-            edge_pixels = np.sum(mask[0, :]) + np.sum(mask[-1, :]) + np.sum(mask[:, 0]) + np.sum(mask[:, -1])
-            edge_ratio = edge_pixels / (2 * (mask.shape[0] + mask.shape[1]))
+            mask_uint8 = (mask * 255).astype(np.uint8)
+            cnts, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts: continue
             
+            best_cnt = max(cnts, key=cv2.contourArea)
+            area = cv2.contourArea(best_cnt)
+            perimeter = cv2.arcLength(best_cnt, True)
+            if perimeter == 0: continue
+            
+            # 원형도 점수 (Circularity: 4*pi*area / perimeter^2)
+            circularity = (4 * np.pi * area) / (perimeter * perimeter)
+            
+            # 기본 점수는 SAM의 Confidence
             final_score = scores[i]
-            if edge_ratio > 0.05:
-                final_score *= 0.1
             
+            # 원형도 가중치 강화 (동전 탐지 시 최우선)
+            if prefer_circular:
+                # 원형도가 0.85 이상이면 매우 높은 가중치 부여
+                circ_weight = 0.8 if circularity > 0.85 else circularity
+                final_score = final_score * 0.3 + circ_weight * 0.7
+            
+            # 면적 가중치 (Large 객체 선호 시)
+            if prefer_largest:
+                size_score = min(1.0, mask_area / (0.10 * img_area))
+                final_score = final_score * 0.4 + size_score * 0.6
+            
+            # 박스 제약 조건 완화: 원형도가 높으면 박스를 조금 벗어나더라도 점수 유지
             if box is not None:
-                x1, y1, x2, y2 = box
-                box_mask = mask[int(y1):int(y2), int(x1):int(x2)]
-                contained_area = np.sum(box_mask)
-                containment_ratio = contained_area / mask_area if mask_area > 0 else 0
-                final_score *= (0.3 + 0.7 * containment_ratio)
+                bx1, by1, bx2, by2 = box
+                mx, my, mw_m, mh_m = cv2.boundingRect(best_cnt)
+                # 박스 이탈 허용 범위: 박스 크기의 20%까지
+                bw_p = (bx2 - bx1) * 0.2
+                bh_p = (by2 - by1) * 0.2
+                if mx < bx1 - bw_p or my < by1 - bh_p or mx + mw_m > bx2 + bw_p or my + mh_m > by2 + bh_p:
+                    if circularity < 0.90: # 원형도가 낮으면서 박스를 이탈하면 점수 삭감
+                        final_score *= 0.3
 
             valid_masks.append({
                 'mask': mask,
                 'sam_score': scores[i],
                 'final_score': final_score,
-                'area': mask_area
+                'area': mask_area,
+                'circularity': circularity
             })
             
         if not valid_masks:
+            # 유효한 마스크가 없으면 가장 점수 높은 마스크라도 반환
             idx = np.argmax(scores)
             return masks[idx], scores[idx]
             
+        # 원형도와 면적이 최적인 마스크 선택
         best = max(valid_masks, key=lambda x: x['final_score'])
-        
-        # --- Post-processing: Clean Mask ---
         final_mask = self.clean_mask(best['mask'])
         
         return final_mask, best['sam_score']
@@ -126,113 +138,195 @@ class AIContactAngleAnalyzer:
         
         return mask_clean > 127
 
+    def _detect_coin_by_features(self, image_cv2, template_path="coin_10krw_template.png"):
+        """
+        SIFT 특징점 매칭을 사용하여 이미지 내에서 템플릿(동전)과 가장 유사한 영역을 찾음.
+        """
+        if not os.path.exists(template_path):
+            return None
+        
+        try:
+            template = cv2.imread(template_path, 0)
+            target = cv2.cvtColor(image_cv2, cv2.COLOR_BGR2GRAY)
+            
+            sift = cv2.SIFT_create()
+            kp1, des1 = sift.detectAndCompute(template, None)
+            kp2, des2 = sift.detectAndCompute(target, None)
+            
+            if des1 is None or des2 is None: return None
+            
+            bf = cv2.BFMatcher()
+            matches = bf.knnMatch(des1, des2, k=2)
+            
+            good = []
+            for m, n in matches:
+                if m.distance < 0.7 * n.distance:
+                    good.append(m)
+            
+            # 매칭 점이 최소 8개 이상이어야 신뢰 가능
+            if len(good) >= 8:
+                src_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+                dst_pts = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+                
+                M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+                if M is not None:
+                    h_t, w_t = template.shape
+                    pts = np.float32([[0, 0], [0, h_t-1], [w_t-1, h_t-1], [w_t-1, 0]]).reshape(-1, 1, 2)
+                    dst = cv2.perspectiveTransform(pts, M)
+                    
+                    x_coords = dst[:, 0, 0]
+                    y_coords = dst[:, 0, 1]
+                    box = [float(np.min(x_coords)), float(np.min(y_coords)), float(np.max(x_coords)), float(np.max(y_coords))]
+                    center = [float(np.mean(x_coords)), float(np.mean(y_coords))]
+                    return {'box': box, 'center': center, 'score': len(good) / 50.0}
+        except Exception as e:
+            print(f"[Feature Match Error] {e}")
+            
+        return None
+
     def auto_detect_coin_candidate(self, image_cv2):
         """
-        CLAHE 전처리, 가중치 기반 필터링을 사용하여 사선 방향의 동전 후보군을 정밀하게 찾음.
+        원주 우선(Rim-first) 전략을 사용하여 동전 내부 문양을 배제하고 전체 테두리를 감지함.
+        Hough Circle의 물리적 제약 강화 + 엣지 팽창(Dilation) 기반 센터 추정 사용.
         """
+        image_rgb = cv2.cvtColor(image_cv2, cv2.COLOR_BGR2RGB)
+        h, w = image_cv2.shape[:2]
         gray = cv2.cvtColor(image_cv2, cv2.COLOR_BGR2GRAY)
-        h, w = gray.shape[:2]
-        img_area = h * w
         
-        # --- 1. 전처리 강화 (Preprocessing) ---
-        # CLAHE (Contrast Limited Adaptive Histogram Equalization) 적용
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-        enhanced = clahe.apply(gray)
-        
-        # 가우시안 블러로 미세 노이즈 억제 (배경 나뭇결 무늬 등)
-        blurred = cv2.GaussianBlur(enhanced, (7, 7), 0)
+        best_cx, best_cy, best_r = 0.0, 0.0, 0.0
+        found = False
+        method_name = ""
         
         candidates = []
-
-        # --- 2. 전략 1: 허프 원 변환 (Hough Circle) ---
-        # 파라미터를 다소 엄격하게 조정하여 확실한 원형만 탐색
-        circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=h/10,
-                                   param1=120, param2=35, minRadius=int(h*0.1), maxRadius=int(h*0.4))
+        
+        # --- 1. 경로 A: 타원 탐색 (Precision-focused) ---
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+        denoised = cv2.medianBlur(enhanced, 5) 
+        edges = cv2.Canny(denoised, 35, 90)
+        
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        dilated = cv2.dilate(edges, kernel, iterations=1)
+        
+        cnts, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in cnts:
+            if len(cnt) < 5: continue
+            area = cv2.contourArea(cnt)
+            perimeter = cv2.arcLength(cnt, True)
+            if perimeter == 0: continue
+            
+            circularity = (4 * np.pi * area) / (perimeter ** 2)
+            if not (h * w * 0.005 < area < h * w * 0.35): continue
+            
+            ellipse = cv2.fitEllipse(cnt)
+            (cx_e, cy_e), (ma, Mi), angle = ellipse
+            
+            aspect_ratio = max(ma, Mi) / (min(ma, Mi) + 1e-6)
+            if aspect_ratio > 1.8: continue
+            
+            hull = cv2.convexHull(cnt)
+            hull_area = cv2.contourArea(hull)
+            solidity = area / (hull_area + 1e-6)
+            if solidity < 0.8: continue
+            
+            # 가중치 스코어: 원형도와 면적, 중앙 집중도 결합
+            dist_to_center = np.sqrt((cx_e-w/2)**2 + (cy_e-h/2)**2)
+            score = (area * circularity) * (1.1 - dist_to_center/(w/2))
+            
+            candidates.append({
+                'center': (cx_e, cy_e), 
+                'radius': max(ma, Mi)/2, 
+                'score': score, 
+                'method': 'Precision-Ellipse',
+                'geom': ellipse
+            })
+            
+        # --- 2. 경로 B: 허프 원 변환 (Fallback) ---
+        blurred_h = cv2.medianBlur(gray, 7)
+        circles = cv2.HoughCircles(blurred_h, cv2.HOUGH_GRADIENT, 1.2, minDist=h/8,
+                                  param1=100, param2=22, minRadius=int(h*0.08), maxRadius=int(h*0.35))
+        
         if circles is not None:
-             circles = circles[0, :]
-             for cx, cy, r in circles:
-                 # 이미지 경계를 벗어나는지 체크
-                 if cx - r < 0 or cy - r < 0 or cx + r > w or cy + r > h:
-                     continue
-                 
-                 candidates.append({
-                     'box': [max(0, cx-r-5), max(0, cy-r-5), min(w, cx+r+5), min(h, cy+r+5)],
-                     'score': 0.9, # 허프 변환 결과는 기본적으로 높은 점수 부여
-                     'area': np.pi * (r**2),
-                     'method': 'Hough'
-                 })
-
-        # --- 3. 전략 2 & 3: 컨투어 분석 (Contour Analysis) ---
-        def process_contours(binary_img, method_name):
-            cnts, _ = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in cnts:
-                area = cv2.contourArea(cnt)
-                
-                # 면적 필터링: 전체 이미지의 2% ~ 35% 사이여야 함 (동전의 일반적인 비율)
-                area_ratio = area / img_area
-                if area_ratio < 0.02 or area_ratio > 0.35: 
-                    continue
-
-                # 볼록 껍질(Hull) 분석
-                hull = cv2.convexHull(cnt)
-                hull_area = cv2.contourArea(hull)
-                if hull_area == 0: continue
-                
-                hull_perimeter = cv2.arcLength(hull, True)
-                if hull_perimeter == 0: continue
-                
-                # 지표 계산
-                solidity = float(area) / hull_area
-                # 원형도 계산 (4 * pi * area / perimeter^2)
-                circularity = 4 * np.pi * hull_area / (hull_perimeter * hull_perimeter)
-                
-                # 종횡비(Aspect Ratio) 확인 - 사선 촬영 고려
-                if len(hull) >= 5:
-                    ellipse = cv2.fitEllipse(hull)
-                    (xc, yc), (d1, d2), angle = ellipse
-                    ar = max(d1, d2) / (min(d1, d2) + 1e-6)
-                else:
-                    ar = 100
-                
-                # 필터링 조건 강화:
-                # 1. 어느 정도 볼록해야 함 (Solidity)
-                # 2. 사선으로 찍혀도 타원 형태를 유지해야 함 (AR < 4.0)
-                # 3. 모양이 부드러워야 함
-                if solidity < 0.88 or ar > 4.0 or circularity < 0.45: 
-                    continue
-                
-                # 가중 점수 계산: (원형도 * 0.4) + (솔리디티 * 0.4) + (면적 비율 * 0.2)
-                # 동전은 이 모든 지표에서 높은 값을 가질 확률이 높음
-                score = (circularity * 0.4) + (solidity * 0.4) + (min(1.0, area_ratio/0.1) * 0.2)
-                
-                x, y, bw, bh = cv2.boundingRect(hull)
+            for c in circles[0, :]:
+                dist_to_center = np.sqrt((c[0]-w/2)**2 + (c[1]-h/2)**2)
+                # 허프 원은 그 자체로 원형도가 보장되므로 면적과 위치만 고려
+                score = (np.pi * (c[2]**2)) * (1.0 - dist_to_center/(w/2))
                 candidates.append({
-                    'box': [max(0, x-5), max(0, y-5), min(w, x+bw+5), min(h, y+bh+5)],
-                    'score': score,
-                    'area': area,
-                    'method': method_name
+                    'center': (c[0], c[1]), 
+                    'radius': c[2], 
+                    'score': score, 
+                    'method': 'Anchor-Hough'
                 })
 
-        # 오츠 이진화 (Otsu) 전에 적응형 임계값 한 번 더 사용
-        thresh_adapt = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                     cv2.THRESH_BINARY_INV, 15, 3)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
-        thresh_adapt = cv2.morphologyEx(thresh_adapt, cv2.MORPH_OPEN, kernel)
-        process_contours(thresh_adapt, 'Adaptive')
-        
-        _, thresh_otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        thresh_otsu = cv2.morphologyEx(thresh_otsu, cv2.MORPH_CLOSE, kernel)
-        process_contours(thresh_otsu, 'Otsu')
-
         if not candidates:
-            print("동전 후보군을 찾지 못했습니다. (이미지 대비 혹은 조도가 원인일 수 있음)")
+            print("[Auto-Detect] 동전 후보 탐색 실패.")
             return None
             
-        # 가중치 점수 기반으로 가장 적합한 객체 선택
+        # 가장 그럴듯한(원형이면서 적절한 크기의 중앙 객체) 후보 선택
         best = max(candidates, key=lambda x: x['score'])
-        print(f"[{best['method']}] 방식을 통해 동전을 성공적으로 감지했습니다. (점수: {best['score']:.2f}, 이미지 대비 면적: {(best['area']/img_area)*100:.1f}%)")
+        best_cx, best_cy, best_r = float(best['center'][0]), float(best['center'][1]), float(best['radius'])
+        method_name = best['method']
+        found = True
         
-        return np.array(best['box'])
+        print(f"[{method_name}] 최종 후보 결정: ({best_cx:.1f}, {best_cy:.1f}), R: {best_r:.1f}")
+        
+        # 가이드 박스 생성
+        best_box = [best_cx - best_r*1.1, best_cy - best_r*1.1, best_cx + best_r*1.1, best_cy + best_r*1.1]
+
+        if not found:
+            print("[Auto-Detect] 동전 타원/원형 검출 실패.")
+            return None
+            
+        print(f"[{method_name}] 동전 위치 확정: ({best_cx:.1f}, {best_cy:.1f}), R_max: {best_r:.1f}")
+
+        # --- 3. 지능형 프롬프트 구성 (강화버전) ---
+        cx, cy, r = best_cx, best_cy, best_r
+        
+        # 긍정 포인트: 중앙 및 테두리 안쪽 4곳
+        pos_points = [[cx, cy]]
+        for ang in [0, 90, 180, 270]:
+            rad_val = np.deg2rad(ang)
+            pos_points.append([cx + r*0.7*np.cos(rad_val), cy + r*0.7*np.sin(rad_val)])
+            
+        # 부정 포인트: 테두리 바깥 4곳 (배경 고립)
+        neg_points = []
+        for ang in [45, 135, 225, 315]:
+            rad_val = np.deg2rad(ang)
+            neg_points.append([cx + r*1.5*np.cos(rad_val), cy + r*1.5*np.sin(rad_val)])
+            
+        input_points = np.array(pos_points + neg_points)
+        input_labels = np.array([1]*len(pos_points) + [0]*len(neg_points))
+        
+        # --- 4. SAM 호출 (Circular & Largest 전략) ---
+        try:
+            self.predictor.set_image(image_rgb)
+            self.image_size = (h, w)
+            
+            # 박스 프롬프트는 Rim을 여유있게 포함하도록 설정
+            box_prompt = np.array([cx - r*1.2, cy - r*1.2, cx + r*1.2, cy + r*1.2])
+            
+            refined_mask, _ = self.predict_mask(
+                point_coords=input_points, 
+                point_labels=input_labels, 
+                box=box_prompt,
+                prefer_largest=True,
+                prefer_circular=True 
+            )
+            
+            refined_mask_uint8 = (refined_mask * 255).astype(np.uint8)
+            cnts, _ = cv2.findContours(refined_mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if cnts:
+                best_cnt = max(cnts, key=cv2.contourArea)
+                rx, ry, rbw, rbh = cv2.boundingRect(best_cnt)
+                padding = 5
+                final_box = [max(0, rx-padding), max(0, ry-padding), min(w, rx+rbw+padding), min(h, ry+rbh+padding)]
+                # Return both box and circle info for UI sliders
+                return np.array(final_box), (float(cx), float(cy), float(r))
+        except Exception as e:
+            print(f"[Rim-SAM Error] {e}")
+            
+        return None, None
 
     def auto_detect_droplet_candidate(self, image_cv2, exclude_box=None):
         """

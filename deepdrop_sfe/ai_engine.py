@@ -168,9 +168,9 @@ class AIContactAngleAnalyzer:
             for cnt in cnts:
                 area = cv2.contourArea(cnt)
                 
-                # 면적 필터링: 전체 이미지의 2% ~ 35% 사이여야 함 (동전의 일반적인 비율)
+                # 면적 필터링: 전체 이미지의 1% ~ 40% 사이여야 함 (사선 촬영 시 면적이 작게 보일 수도, 크게 보일 수도 있음)
                 area_ratio = area / img_area
-                if area_ratio < 0.02 or area_ratio > 0.35: 
+                if area_ratio < 0.01 or area_ratio > 0.40: 
                     continue
 
                 # 볼록 껍질(Hull) 분석
@@ -194,16 +194,16 @@ class AIContactAngleAnalyzer:
                 else:
                     ar = 100
                 
-                # 필터링 조건 강화:
-                # 1. 어느 정도 볼록해야 함 (Solidity)
+                # 필터링 조건 강화 (Oblique Friendly):
+                # 1. 어느 정도 볼록해야 함 (Solidity > 0.85)
                 # 2. 사선으로 찍혀도 타원 형태를 유지해야 함 (AR < 4.0)
-                # 3. 모양이 부드러워야 함
-                if solidity < 0.88 or ar > 4.0 or circularity < 0.45: 
+                # 3. 모양이 아주 망가지지 않아야 함 (Circularity > 0.4)
+                if solidity < 0.85 or ar > 4.0 or circularity < 0.4: 
                     continue
                 
-                # 가중 점수 계산: (원형도 * 0.4) + (솔리디티 * 0.4) + (면적 비율 * 0.2)
-                # 동전은 이 모든 지표에서 높은 값을 가질 확률이 높음
-                score = (circularity * 0.4) + (solidity * 0.4) + (min(1.0, area_ratio/0.1) * 0.2)
+                # 가중 점수 계산: (원형도 * 0.3) + (솔리디티 * 0.4) + (면적 비율 * 0.3)
+                # 사선 촬영 시 원형도는 낮아지므로 가중치를 조금 낮춤
+                score = (circularity * 0.3) + (solidity * 0.4) + (min(1.0, area_ratio/0.1) * 0.3)
                 
                 x, y, bw, bh = cv2.boundingRect(hull)
                 candidates.append({

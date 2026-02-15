@@ -1,5 +1,25 @@
 # 개발 로그 (Development Log)
 
+##### 2026-02-15 #####
+
+### 1. 사선 촬영(Oblique Shooting) 지원 및 원근 보정 기능 구현
+- 작업 내용:
+    - Homography 기반 원근 보정 로직 구현 (PerspectiveCorrector).
+    - 타원형 동전을 정원으로 변환하여 Top-down View 생성.
+    - `ai_engine.py`: 사선 촬영 시 찌그러진 타원 동전 감지 로직 강화 (Aspect Ratio 허용 범위 확대).
+
+### 2. 정밀 분석을 위한 UI/UX 개선
+- 신규 기능:
+    - **Canvas Drawing Mode**: 모바일 환경을 고려하여 슬라이더 대신 화면 위에 직접 박스를 그리는 인터페이스 도입 (`streamlit-drawable-canvas`).
+    - **Dynamic Droplet Visualization**: 측정된 접촉각을 직관적으로 이해할 수 있도록 파란색 물방울 단면 프로필을 실시간으로 시각화 (Matplotlib).
+    - **SFE Analysis Guide**: 물리적 정합성을 위해 Manual Selection을 통한 보정 가이드라인 추가.
+
+### 3. 버그 수정 및 최적화
+- 수정 사항:
+    - `st_canvas`의 Key가 파일명 변경에만 반응하던 버그 수정 (참조 물체/모드 변경 시 강제 리프레시).
+    - Streamlit Deprecation Warning (`use_column_width` -> `use_container_width`) 해결.
+    - 리포트의 수치적 불일치(Volume vs Diameter) 문제를 해결하기 위해 기본 부피를 100uL로 조정 및 수동 보정 절차 확립.
+
 ##### 2026-02-10 #####
 
 ### 1. 최종 브랜치 통합 및 메인 브랜치 병합

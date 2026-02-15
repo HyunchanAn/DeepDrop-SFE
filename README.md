@@ -14,10 +14,11 @@ DeepDrop-AnyView는 기존 측면(Side-view) 촬영 방식의 제약을 없앤 �
 
 ### 2. Reference Object Calibration (참조 물체 기반 보정)
 - **Auto Scale**: 10원 동전(구형/신형)을 함께 촬영하면, AI가 이를 자동으로 감지하여 **Pixel-to-mm** 스케일을 계산합니다.
-- **Manual Fallback**: 조명이나 각도가 난해하여 AI가 동전을 찾지 못할 경우, **직접 그리기(Manual Selection)** 모드를 통해 분석을 계속할 수 있습니다.
+- **Manual Fallback**: 조명이나 각도가 난해하여 AI가 동전을 찾지 못할 경우, **직접 그리기(Canvas Drawing)** 모드를 통해 직관적으로 영역을 지정할 수 있습니다 (모바일 터치 지원).
 
 ### 3. Volume-Based Calculation (부피 기반 연산)
 - **Physics Engine**: 단순한 타원 피팅이 아닌, 액적의 실제 **부피(Volume)**와 **접촉 반경(Contact Radius)**을 통해 물리적으로 타당한 접촉각을 역산(Numerical Solver)합니다.
+- **Dynamic Visualization**: 측정된 접촉각을 기반으로 물방울의 측면 프로필(Side Profile)을 **실시간으로 시각화**하여 수치와 형상의 일치 여부를 직관적으로 검증합니다.
 
 ### 4. High-End Hardware Optimization (하드웨어 최적화)
 - **RTX 5080 지원**: 최신 Blackwell 아키텍처 및 CUDA 12.8 환경에서 **SAM 2.1** 모델을 통해 초고속(약 30ms) 이미지 분석을 제공합니다.

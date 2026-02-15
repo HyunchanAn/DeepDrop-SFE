@@ -5,6 +5,7 @@ import sys
 import os
 from PIL import Image
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from deepdrop_sfe import AIContactAngleAnalyzer, DropletPhysics, PerspectiveCorrector
 
@@ -17,7 +18,7 @@ TRANS = {
     "KR": {
         "title": "DeepDrop-AnyView: 임의 각도 표면 에너지 분석기",
         "notice": """
-        > **안내**: 이 시스템은 **기준 물체(예: 100원 동전)**를 사용하여 사진의 원근 왜곡을 보정합니다.
+        > **안내**: 이 시스템은 기준 물체(예: 100원 동전)를 사용하여 사진의 원근 왜곡을 보정합니다.
         > 액적 옆에 동전을 두고, 동전이 잘 보이도록 촬영해 주세요.
         """,
         "header_config": "설정 (Configuration)",
@@ -72,7 +73,7 @@ TRANS = {
     "EN": {
         "title": "DeepDrop-AnyView: Arbitrary Angle SFE Analyzer",
         "notice": """
-        > **Note**: This system uses a **Reference Object (e.g., Coin)** to correct perspective distortion.
+        > Note: This system uses a Reference Object (e.g., Coin) to correct perspective distortion.
         > Please place the coin next to the droplet and ensure it is clearly visible.
         """,
         "header_config": "Configuration",
@@ -146,7 +147,7 @@ def render_controls(container, R):
 
     # Experiment Parameters
     container.subheader(R["header_exp_params"])
-    volume_ul = container.number_input(R["lbl_volume"], min_value=0.1, value=3.0, step=0.1, key="ctrl_volume")
+    volume_ul = container.number_input(R["lbl_volume"], min_value=0.1, max_value=1000.0, value=100.0, step=0.1, format="%.1f", key="ctrl_volume")
     
     # Reference Object
     container.subheader(R["header_ref_obj"])
@@ -187,6 +188,42 @@ if ui_width is not None and ui_width < 800:
 else:
     # PC Mode (Default)
     is_mobile = False
+
+# Helper: Draw Dynamic Droplet Profile
+def plot_droplet_profile(contact_angle):
+    fig, ax = plt.subplots(figsize=(4, 2))
+    theta = np.radians(contact_angle)
+    
+    # Baseline
+    ax.plot([-1.5, 1.5], [0, 0], color='black', linewidth=2)
+    
+    base_radius = 1.0
+    
+    if contact_angle < 90:
+        # Hydrophilic
+        R = base_radius / np.sin(theta)
+        y_c = -base_radius / np.tan(theta)
+        
+        # Arc top
+        circle = plt.Circle((0, y_c), R, color='skyblue', alpha=0.6)
+        ax.add_patch(circle)
+        ax.set_ylim(0, 2.0)
+        
+    else:
+        # Hydrophobic
+        R = base_radius / np.sin(np.pi - theta)
+        y_c = -base_radius / np.tan(theta) 
+        
+        circle = plt.Circle((0, y_c), R, color='skyblue', alpha=0.6)
+        ax.add_patch(circle)
+        ax.set_ylim(0, 2.5)
+
+    ax.set_xlim(-1.5, 1.5)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    ax.set_title(f"Visualized Profile (Angle: {contact_angle:.1f}°)", fontsize=10)
+    plt.tight_layout()
+    return fig
 
 # Render Language Toggle
 # For mobile, maybe small columns at top?
@@ -248,7 +285,7 @@ if uploaded_file:
     
     if mode == "자동 감지 (Auto)":
         with col1:
-            st.image(image_rgb, caption=R["cap_original"], use_column_width=True)
+            st.image(image_rgb, caption=R["cap_original"], use_container_width=True)
             
         with st.spinner(R["msg_detecting"]):
             coin_box = analyzer.auto_detect_coin_candidate(image)
@@ -260,41 +297,74 @@ if uploaded_file:
             cv2.rectangle(preview_img, (x1, y1), (x2, y2), (0, 255, 0), 3)
             
             with col2:
-                st.image(preview_img, caption=R["cap_detected"], use_column_width=True)
+                st.image(preview_img, caption=R["cap_detected"], use_container_width=True)
                 
             st.info(R["msg_confirm_box"])
             if not st.checkbox(R["chk_confirm"], value=True):
                 coin_box = None # User rejected
     
-    else: # Manual Mode
-        st.info("슬라이더를 사용하여 동전 영역을 지정해주세요. (Use sliders to specify coin region)")
+    else: # Manual Mode (Canvas Drawing)
+        st.info("이미지 위에서 동전 영역을 드래그하여 박스로 지정해주세요. (Draw a box around the coin)")
         
-        h, w, _ = image_rgb.shape
+        from streamlit_drawable_canvas import st_canvas
         
-        col_input1, col_input2 = st.columns(2)
+        # Canvas Settings
+        # Resize for canvas display to fit screen (width 400-600px)
+        # Use responsive width if possible, but st_canvas needs fixed size usually.
+        # Let's use a fixed max width logic.
         
-        with col_input1:
-            st.write("**좌상단 좌표 (Top-Left)**")
-            x1 = st.slider("X1", 0, w, int(w*0.3), key="x1")
-            y1 = st.slider("Y1", 0, h, int(h*0.3), key="y1")
+        h_orig, w_orig, _ = image_rgb.shape
+        canvas_width = 400 if is_mobile else 600
+        scale_factor = canvas_width / w_orig
+        canvas_height = int(h_orig * scale_factor)
         
-        with col_input2:
-            st.write("**우하단 좌표 (Bottom-Right)**")
-            x2 = st.slider("X2", 0, w, int(w*0.7), key="x2")
-            y2 = st.slider("Y2", 0, h, int(h*0.7), key="y2")
+        img_resized = cv2.resize(image_rgb, (canvas_width, canvas_height)).astype(np.uint8)
         
-        # Validate box
-        if x2 > x1 and y2 > y1:
-            coin_box = np.array([x1, y1, x2, y2])
-            
-            # Show preview
-            preview_img = image_rgb.copy()
-            cv2.rectangle(preview_img, (x1, y1), (x2, y2), (0, 255, 0), 3)
-            
-            with col1:
-                st.image(preview_img, caption="Manual Selection Preview", use_column_width=True)
+        # Provide a unique key for the canvas to avoid conflicts
+        canvas_result = st_canvas(
+            fill_color="rgba(0, 255, 0, 0.2)",
+            stroke_width=2,
+            stroke_color="#00FF00",
+            background_image=Image.fromarray(img_resized, mode="RGB"),
+            update_streamlit=True,
+            height=canvas_height,
+            width=canvas_width,
+            drawing_mode="rect",
+            key=f"canvas_ref_obj_{uploaded_file.name}_{st.session_state.get('ctrl_ref_choice', '')}_{mode}"
+        )
+        
+        if canvas_result.json_data is not None:
+            objects = pd.json_normalize(canvas_result.json_data["objects"])
+            if not objects.empty:
+                # Get the last drawn object
+                obj = objects.iloc[-1]
+                left = obj["left"]
+                top = obj["top"]
+                width = obj["width"]
+                height = obj["height"]
+                
+                # Convert back to original coordinates
+                x1 = int(left / scale_factor)
+                y1 = int(top / scale_factor)
+                x2 = int((left + width) / scale_factor)
+                y2 = int((top + height) / scale_factor)
+                
+                coin_box = np.array([x1, y1, x2, y2])
+                st.write(f"Selected Box: {coin_box}")
+                
+                # --- Validation Step ---
+                # Check if the selection makes sense (Aspect Ratio of Box)
+                box_w = x2 - x1
+                box_h = y2 - y1
+                box_ar = max(box_w, box_h) / (min(box_w, box_h) + 1e-6)
+                
+                if box_ar > 3.0:
+                    st.warning("경고: 박스가 너무 길쭉합니다. 동전을 꽉 차게 그려주세요.")
+                
+            else:
+                st.warning("동전 영역을 그려주세요.")
+                coin_box = None
         else:
-            st.warning("좌표가 올바르지 않습니다. X2 > X1, Y2 > Y1이어야 합니다.")
             coin_box = None
 
 
@@ -307,9 +377,29 @@ if uploaded_file:
         coin_mask, _ = analyzer.predict_mask(box=coin_box)
         coin_mask_binary = analyzer.get_binary_mask(coin_mask)
         
+        # --- Advanced Validation on Mask ---
+        contours, _ = cv2.findContours(coin_mask_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            cnt = max(contours, key=cv2.contourArea)
+            area = cv2.contourArea(cnt)
+            hull = cv2.convexHull(cnt)
+            hull_area = cv2.contourArea(hull)
+            solidity = float(area) / hull_area if hull_area > 0 else 0
+            
+            if len(cnt) >= 5:
+                (ex, ey), (eda, edb), e_angle = cv2.fitEllipse(cnt)
+                e_ar = max(eda, edb) / (min(eda, edb) + 1e-6)
+            else:
+                e_ar = 100.0
+            
+            if solidity < 0.8:
+                st.warning(f"⚠️ 감지된 물체의 모양이 불규칙합니다 (Solidity: {solidity:.2f}). 조명이 반사되거나 배경이 복잡할 수 있습니다.")
+            if e_ar > 5.0:
+                st.warning(f"⚠️ 물체가 너무 납작해 보입니다 (AR: {e_ar:.1f}). 카메라 각도가 너무 기울어졌을 수 있습니다.")
+                
         # DEBUG: Visualize Coin Mask
         with col2:
-             st.image(coin_mask_binary * 255, caption="Debug: Coin Mask (Binary)", use_column_width=True)
+             st.image(coin_mask_binary * 255, caption="Debug: Coin Mask (Binary)", use_container_width=True)
 
         # Calculate Homography
         H, warped_size, coin_info, fitted_ellipse = corrector.find_homography(image_rgb, coin_mask_binary)
@@ -324,12 +414,12 @@ if uploaded_file:
             cv2.circle(debug_ellipse_img, (int(ecx), int(ecy)), 5, (0, 0, 255), -1)
             
             with col1:
-                st.image(debug_ellipse_img, caption="Debug: Fitted Ellipse", use_column_width=True)
+                st.image(debug_ellipse_img, caption="Debug: Fitted Ellipse", use_container_width=True)
 
             warped_img = corrector.warp_image(image_rgb, H, warped_size)
             
             # Visualize Warped Image
-            st.image(warped_img, caption=R["cap_warped"], use_column_width=True)
+            st.image(warped_img, caption=R["cap_warped"], use_container_width=True)
             
             # 3. Droplet Analysis
             st.divider()
@@ -392,11 +482,11 @@ if uploaded_file:
             vis_mask[droplet_mask_bool] = [255, 0, 0] # Red mask
             overlay = cv2.addWeighted(warped_img, 0.7, vis_mask, 0.3, 0)
             
-            if drop_mode == "수동 (Box Draw)":
+            if drop_mode == R["opt_drop_manual"]:
                 with c_col2:
-                    st.image(overlay, caption=R["cap_segmentation"], use_column_width=True)
+                    st.image(overlay, caption=R["cap_segmentation"], use_container_width=True)
             else:
-                st.image(overlay, caption=R["cap_segmentation"], use_column_width=True)
+                st.image(overlay, caption=R["cap_segmentation"], use_container_width=True)
             
             # 4. Calculation
             st.subheader(R["header_step3"])
@@ -419,6 +509,9 @@ if uploaded_file:
             
             st.success(R["msg_success"].format(contact_angle))
 
+            # Show Dynamic Plot
+            st.pyplot(plot_droplet_profile(contact_angle))
+            
             # Advanced Diagnostics
             with st.expander(R["lbl_advanced_diag"]):
                 st.write(f"**Solver Status**: {diag['status']}")
@@ -434,7 +527,20 @@ if uploaded_file:
                 if diag['status'] != "Success":
                     st.warning("계산에 실패하거나 캡(Cap)이 씌워졌습니다. 위 값들을 개발자에게 전달해 주세요.")
             
-            # 5. SFE Table Management
+            # 5. Reference Guide
+            st.divider()
+            with st.expander("ℹ️ 접촉각 참조 가이드 (Contact Angle Reference)", expanded=True):
+                st.markdown("""
+                ### 접촉각의 의미 (Wetting Properties)
+                * **0° ~ 10°**: 완전 퍼짐 (Super-hydrophilic) - 물이 표면에 쫙 달라붙음.
+                * **10° ~ 90°**: 친수성 (Hydrophilic) - 물이 어느 정도 퍼짐.
+                * **90° ~ 150°**: 소수성 (Hydrophobic) - 물방울이 맺힘.
+                * **150° ~ 180°**: 초소수성 (Super-hydrophobic) - 물방울이 구슬처럼 굴러다님.
+                """)
+                # Local Image (Generated by Matplotlib)
+                st.image("demo/assets/contact_angle_ref.png", 
+                         caption="접촉각(θ)과 젖음성(Wetting) 예시", 
+                         use_container_width=True)
             st.divider()
             st.subheader(R["header_sfe_table"])
             
@@ -485,4 +591,4 @@ if uploaded_file:
 
     else:
         st.error(R["err_no_coin"])
-        st.image(image_rgb, caption=R["cap_input"], use_column_width=True)
+        st.image(image_rgb, caption=R["cap_input"], use_container_width=True)

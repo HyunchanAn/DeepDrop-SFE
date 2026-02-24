@@ -73,21 +73,10 @@ def run_validation():
         _, _, radius_px = coin_info
         pixels_per_mm = DropletPhysics.calculate_pixels_per_mm(radius_px, case['ref_diameter_mm'])
         
-        # Use enhanced fitting method
-        contact_diameter_mm = DropletPhysics.calculate_contact_diameter(droplet_mask, pixels_per_mm, method="fitting")
+        # Use enhanced fitting method with circularity
+        contact_diameter_mm, circularity = DropletPhysics.calculate_contact_diameter(droplet_mask, pixels_per_mm, method="fitting", return_extra=True)
         contact_angle, diag = DropletPhysics.calculate_contact_angle(case['volume_ul'], contact_diameter_mm, return_info=True)
         
-        # Circularity Score (Reliability)
-        contours, _ = cv2.findContours(droplet_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contours:
-            cnt = max(contours, key=cv2.contourArea)
-            area = cv2.contourArea(cnt)
-            _, radius = cv2.minEnclosingCircle(cnt)
-            circle_area = np.pi * (radius**2)
-            circularity = area / circle_area if circle_area > 0 else 0
-        else:
-            circularity = 0
-            
         print(f"  - Contact Diameter: {contact_diameter_mm:.3f} mm")
         print(f"  - Calculated Angle: {contact_angle:.3f} deg")
         if "expected_angle" in case:

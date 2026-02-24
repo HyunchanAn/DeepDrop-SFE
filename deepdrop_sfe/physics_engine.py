@@ -31,7 +31,7 @@ class DropletPhysics:
         return coin_diameter_pixel / real_coin_diameter_mm
 
     @staticmethod
-    def calculate_contact_diameter(droplet_mask, pixels_per_mm, method="fitting"):
+    def calculate_contact_diameter(droplet_mask, pixels_per_mm, method="fitting", return_extra=False):
         """
         Calculates the real contact diameter of the droplet from its mask.
         
@@ -40,11 +40,13 @@ class DropletPhysics:
         - 'fitting': Geometric diameter using minimum enclosing circle (robust to noise).
         """
         if pixels_per_mm <= 0:
+            if return_extra: return 0.0, 0.0
             return 0.0
 
         # Find contours
         contours, _ = cv2.findContours(droplet_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
+            if return_extra: return 0.0, 0.0
             return 0.0
         
         # Select the largest contour
@@ -52,18 +54,27 @@ class DropletPhysics:
         area_pixels = cv2.contourArea(cnt)
         
         if area_pixels < 10:
+            if return_extra: return 0.0, 0.0
             return 0.0
+            
+        # Calculate Circularity (Reliability)
+        # Circularity = Area / (pi * r_enclosing^2)
+        (cx, cy), radius_enclosing = cv2.minEnclosingCircle(cnt)
+        circle_area = np.pi * (radius_enclosing**2)
+        circularity = area_pixels / circle_area if circle_area > 0 else 0
 
         if method == "area":
             # Area = pi * (d/2)^2 => d = 2 * sqrt(Area / pi)
             diameter_pixels = 2 * np.sqrt(area_pixels / np.pi)
         else:
-            # Geometric fitting: Minimum Enclosing Circle
-            (x, y), radius = cv2.minEnclosingCircle(cnt)
-            diameter_pixels = 2 * radius
+            # Geometric fitting
+            diameter_pixels = 2 * radius_enclosing
             
         # Convert to mm
         diameter_mm = diameter_pixels / pixels_per_mm
+        
+        if return_extra:
+            return diameter_mm, circularity
         return diameter_mm
 
     @staticmethod
@@ -99,36 +110,45 @@ class DropletPhysics:
         
         # Function to find root for: f(theta) - target_V = 0
         def volume_eq(theta_deg):
-            theta_deg_clipped = np.clip(theta_deg, 1e-7, 179.99)
+            # Clip to avoid division by zero and extreme values
+            theta_deg_clipped = np.clip(theta_deg, 1e-8, 179.9999)
             theta_rad = np.radians(theta_deg_clipped)
+            
+            # Using stable form to avoid sin(theta)^3 in denominator when theta is small
+            # V = (pi * r^3 / 3) * ( (1-cos(theta))^2 * (2+cos(theta)) / sin(theta)^3 )
+            
             sin_t = np.sin(theta_rad)
             cos_t = np.cos(theta_rad)
-            term = ((1 - cos_t)**2 * (2 + cos_t)) / (sin_t**3)
+            
+            if theta_deg_clipped < 0.1:
+                # Small angle approximation for numerical stability
+                # Using Taylor expansion: V approx (pi * r^3 * theta_rad) / 4
+                term = (3.0 * theta_rad) / 4.0
+            else:
+                term = ((1 - cos_t)**2 * (2 + cos_t)) / (sin_t**3 + 1e-18)
+                
             V_calc = (np.pi * r**3 / 3.0) * term
             return V_calc - target_V
             
         try:
-            v_low = volume_eq(1e-7)
-            v_high = volume_eq(179.9)
-            diag["v_low"] = v_low
-            diag["v_high"] = v_high
+            # Check boundaries for brentq
+            v_low_val = volume_eq(1e-8)
+            v_high_val = volume_eq(179.99)
+            diag["v_low"] = v_low_val
+            diag["v_high"] = v_high_val
             
-            if v_low * v_high > 0:
-                if target_V >= v_full:
-                    diag["status"] = "Capped: Volume exceeds sphere"
-                    if return_info: return 180.0, diag
-                    return 180.0
-                
-                if target_V < 1e-5:
-                    diag["status"] = "Capped: Near-zero volume"
-                    if return_info: return 0.0, diag
-                    return 0.0
-
-                diag["status"] = "Warning: Sign mismatch"
+            if v_low_val > 0:
+                diag["status"] = "Capped: Near-zero volume (Minimum reached)"
                 if return_info: return 0.0, diag
                 return 0.0
                 
-            theta_sol = brentq(volume_eq, 1e-7, 179.9)
+            if v_high_val < 0:
+                diag["status"] = "Capped: Volume exceeds sphere (Maximum reached)"
+                if return_info: return 180.0, diag
+                return 180.0
+
+            # Solve using brentq with safety margins and explicit tolerance
+            theta_sol = brentq(volume_eq, 1e-8, 179.99, xtol=1e-6)
             diag["status"] = "Success"
             
             # --- Reliability Metrics ---

@@ -9,18 +9,25 @@ class AIContactAngleAnalyzer:
     """
     SAM2 (Segment Anything Model 2) 기반의 액적 및 참조 물체 분석기.
     RTX 5080과 같은 하이엔드 하드웨어에서 SAM 2.1 Large 모델을 사용하도록 최적화됨.
+    메모리가 제한된 CPU 환경(Streamlit Cloud 등)에서는 Tiny 모델을 사용함.
     """
-    def __init__(self, model_id="facebook/sam2.1-hiera-large", device=None):
+    def __init__(self, model_id=None, device=None):
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         
+        # CPU 환경(배포 환경)에서는 메모리 문제(OOM)를 방지하기 위해 가장 작은 모델(tiny)을 기본으로 사용
+        if model_id is None:
+            self.model_id = "facebook/sam2.1-hiera-large" if self.device == "cuda" else "facebook/sam2.1-hiera-tiny"
+        else:
+            self.model_id = model_id
+            
         if self.device == "cuda":
             gpu_name = torch.cuda.get_device_name(0)
             vram_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            print(f"SAM 2.1 모델 ({model_id})을 GPU에서 로드 중: {gpu_name} ({vram_total:.1f}GB VRAM)...")
+            print(f"SAM 2.1 모델 ({self.model_id})을 GPU에서 로드 중: {gpu_name} ({vram_total:.1f}GB VRAM)...")
             # 하이엔드 하드웨어 최적화 활성화
             torch.backends.cudnn.benchmark = True
         else:
-            print(f"SAM 2.1 모델 ({model_id})을 {self.device}에서 로드 중...")
+            print(f"SAM 2.1 모델 ({self.model_id})을 {self.device}에서 로드 중 (OOM 방지)...")
 
         # build_sam2_hf는 가중치 다운로드 및 설정을 자동으로 처리함
         try:

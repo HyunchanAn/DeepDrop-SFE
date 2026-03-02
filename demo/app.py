@@ -258,7 +258,8 @@ def load_models():
         # 하이엔드 하드웨어(RTX 5080)를 위해 large 모델 사용
         # 초기 실행 시 HF에서 자동으로 다운로드함
         with st.spinner(R["msg_downloading"]):
-            analyzer = AIContactAngleAnalyzer(model_id="facebook/sam2.1-hiera-large")
+            # AIContactAngleAnalyzer 내장 로직에 따라 GPU면 large, CPU(클라우드)면 tiny 모델 로드
+            analyzer = AIContactAngleAnalyzer()
             corrector = PerspectiveCorrector()
         return analyzer, corrector
     except Exception as e:

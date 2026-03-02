@@ -33,9 +33,9 @@ TRANS = {
         "lbl_ref_diam": "물체 직경 (Diameter, mm)",
         "msg_diam": "직경: {} mm",
         "lbl_liquid": "액체 종류 (Liquid Type)",
-        "msg_downloading": "SAM 2.1 모델 가중치 확인 및 다운로드 중...",
+        "msg_downloading": "MobileSAM 모델 로딩 중...",
         "msg_download_done": "모델 로드 완료!",
-        "err_model_load": "SAM 2.1 모델 로드 실패: {}",
+        "err_model_load": "MobileSAM 모델 로드 실패: {}",
         "lbl_upload": "이미지 업로드 (동전 & 액적 포함)",
         "header_step1": "1. 기준 물체 감지 (Reference Detection)",
         "cap_original": "원본 이미지",
@@ -90,9 +90,9 @@ TRANS = {
         "lbl_ref_diam": "Diameter (mm)",
         "msg_diam": "Diameter: {} mm",
         "lbl_liquid": "Liquid Type",
-        "msg_downloading": "Checking/Downloading SAM 2.1 weights...",
+        "msg_downloading": "Loading MobileSAM...",
         "msg_download_done": "Model loaded!",
-        "err_model_load": "Failed to load SAM 2.1: {}",
+        "err_model_load": "Failed to load MobileSAM: {}",
         "lbl_upload": "Upload Image (with Coin & Droplet)",
         "header_step1": "1. Reference Object Detection",
         "cap_original": "Original Image",
@@ -252,14 +252,11 @@ else:
 @st.cache_resource
 def load_models():
     """
-    SAM 2.1 모델 로드 (ai_engine.py의 최신 사양 준수)
+    MobileSAM 모델 로드 (ai_engine.py 연동)
     """
     try:
-        # 하이엔드 하드웨어(RTX 5080)를 위해 large 모델 사용
-        # 초기 실행 시 HF에서 자동으로 다운로드함
         with st.spinner(R["msg_downloading"]):
-            # AIContactAngleAnalyzer 내장 로직에 따라 GPU면 large, CPU(클라우드)면 tiny 모델 로드
-            analyzer = AIContactAngleAnalyzer()
+            analyzer = AIContactAngleAnalyzer(model_type="vit_t")
             corrector = PerspectiveCorrector()
         return analyzer, corrector
     except Exception as e:

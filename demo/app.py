@@ -338,12 +338,10 @@ if uploaded_file:
         # 2. Perspective Correction
         st.subheader(R["header_step2"])
             
-        # If manual mask is ready, use it. Otherwise predict (should not happen with new flow)
-        if 'manual_mask_bool' in locals():
-            coin_mask = manual_mask_bool
-        else:
-             analyzer.set_image(image_rgb)
-             coin_mask, _ = analyzer.predict_mask(box=coin_box)
+        # Always use AI (SAM) to generate the true, perspective-distorted elliptical mask of the coin
+        # Using a mathematically perfect circle (manual_mask) would destroy perspective information.
+        analyzer.set_image(image_rgb)
+        coin_mask, _ = analyzer.predict_mask(box=coin_box)
         
         coin_mask_binary = analyzer.get_binary_mask(coin_mask)
         
